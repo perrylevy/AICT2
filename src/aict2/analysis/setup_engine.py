@@ -23,6 +23,7 @@ from aict2.analysis.trade_planning import (
     requires_retrace,
     weighted_bias_score,
 )
+from aict2.analysis.session_levels import select_best_intraday_frame
 from aict2.io.filename_parsing import parse_chart_file_name
 
 _TF_ORDER = {
@@ -133,7 +134,7 @@ def _derive_draw_on_liquidity(
     bias: str,
 ) -> str:
     daily = frames.get("Daily")
-    intraday = next((frames[tf] for tf in ("5M", "15M", "1M", "1H", "4H") if tf in frames), None)
+    intraday = select_best_intraday_frame(frames)
     daily_candidate: str | None = None
     if daily is not None and len(daily) >= 2:
         prior_day = daily.iloc[-2]

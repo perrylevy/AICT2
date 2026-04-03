@@ -160,6 +160,48 @@ def test_derive_setup_plan_prefers_nearer_london_high_over_farther_previous_sess
     assert plan.draw_on_liquidity.startswith("London High ")
 
 
+def test_derive_setup_plan_uses_same_london_level_as_session_levels_when_intraday_frames_disagree(
+    tmp_path: Path,
+) -> None:
+    chart_4h = tmp_path / "CME_MINI_MNQ1!, 240.csv"
+    chart_15 = tmp_path / "CME_MINI_MNQ1!, 15.csv"
+    chart_1 = tmp_path / "CME_MINI_MNQ1!, 1.csv"
+    _write_chart(
+        chart_4h,
+        [
+            ("2026-04-02T02:00:00-04:00", 24080.0, 24160.0, 24020.0, 24140.0),
+            ("2026-04-02T06:00:00-04:00", 24140.0, 24170.0, 24080.0, 24120.0),
+            ("2026-04-02T10:00:00-04:00", 24120.0, 24190.0, 24090.0, 24130.0),
+        ],
+    )
+    _write_chart(
+        chart_15,
+        [
+            ("2026-04-01T18:00:00-04:00", 24110.0, 24140.0, 24100.0, 24120.0),
+            ("2026-04-02T00:15:00-04:00", 24120.0, 24184.25, 24105.0, 24160.0),
+            ("2026-04-02T05:45:00-04:00", 24160.0, 24180.0, 24120.0, 24140.0),
+            ("2026-04-02T08:45:00-04:00", 24140.0, 24155.0, 24105.0, 24120.0),
+            ("2026-04-02T09:00:00-04:00", 24120.0, 24135.0, 24105.0, 24115.0),
+        ],
+    )
+    _write_chart(
+        chart_1,
+        [
+            ("2026-04-01T18:00:00-04:00", 24110.0, 24140.0, 24110.0, 24120.0),
+            ("2026-04-02T00:05:00-04:00", 24120.0, 24170.0, 24112.0, 24140.0),
+            ("2026-04-02T01:02:00-04:00", 24140.0, 24193.50, 24120.0, 24180.0),
+            ("2026-04-02T05:50:00-04:00", 24180.0, 24182.0, 24130.0, 24145.0),
+            ("2026-04-02T08:55:00-04:00", 24145.0, 24155.0, 24110.0, 24118.0),
+            ("2026-04-02T09:01:00-04:00", 24118.0, 24128.0, 24112.0, 24124.0),
+        ],
+    )
+
+    plan = derive_setup_plan([str(chart_4h), str(chart_15), str(chart_1)])
+
+    assert plan is not None
+    assert plan.draw_on_liquidity == "London Low 24112.00"
+
+
 def test_derive_setup_plan_prefers_nearer_asia_low_over_farther_previous_session_low(
     tmp_path: Path,
 ) -> None:

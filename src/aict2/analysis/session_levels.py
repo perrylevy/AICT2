@@ -77,7 +77,7 @@ def _session_coverage_score(frame: pd.DataFrame) -> tuple[int, int]:
     return score, len(frame)
 
 
-def _select_best_intraday_frame(frames: dict[str, pd.DataFrame]) -> pd.DataFrame | None:
+def select_best_intraday_frame(frames: dict[str, pd.DataFrame]) -> pd.DataFrame | None:
     candidates: list[tuple[tuple[int, int, int], pd.DataFrame]] = []
     for index, timeframe in enumerate(_INTRADAY_PRIORITY):
         frame = frames.get(timeframe)
@@ -244,7 +244,7 @@ def derive_session_levels_from_paths(
     current_time: datetime,
 ) -> SessionLevels | None:
     frames = load_chart_frames(file_paths, parse_chart_file_name)
-    frame = _select_best_intraday_frame(frames)
+    frame = select_best_intraday_frame(frames)
     if frame is None:
         return None
     trade_date = _trade_date_from_frame(frame)

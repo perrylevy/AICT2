@@ -13,9 +13,10 @@ from aict2.macro.publisher import MacroPublishSettings, main
 from aict2.macro.settings import load_macro_publish_settings
 
 
-def test_macro_main_returns_error_when_token_missing() -> None:
+def test_macro_main_returns_error_when_token_missing(capsys) -> None:
     exit_code = main(env={"AICT2_DISCORD_TOKEN": "", "MACRO_DASHBOARD_CHANNEL": "macro-dashboard"})
     assert exit_code == 1
+    assert "AICT2_DISCORD_TOKEN is not set" in capsys.readouterr().err
 
 
 def test_macro_main_calls_runner_with_payload_when_token_present() -> None:

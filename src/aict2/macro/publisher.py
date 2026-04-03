@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
@@ -128,6 +129,7 @@ def main(
     _ = argv
     settings = load_macro_publish_settings(env)
     if not settings.discord_token:
+        print('AICT2_DISCORD_TOKEN is not set.', file=sys.stderr)
         return 1
 
     source = env if env is not None else os.environ

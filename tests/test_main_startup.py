@@ -9,7 +9,7 @@ from aict2.bot import settings as bot_settings_module
 from aict2.bot.main import main
 
 
-def test_main_returns_error_when_token_missing(tmp_path) -> None:
+def test_main_returns_error_when_token_missing(tmp_path, capsys) -> None:
     exit_code = main(
         env={
             "AICT2_DISCORD_TOKEN": "",
@@ -19,6 +19,7 @@ def test_main_returns_error_when_token_missing(tmp_path) -> None:
     )
 
     assert exit_code == 1
+    assert "AICT2_DISCORD_TOKEN is not set" in capsys.readouterr().err
 
 
 def test_main_calls_runner_when_token_present(tmp_path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+import sys
 
 from aict2.analysis.analysis_service import AnalysisSnapshot, build_analysis_snapshot
 from aict2.analysis.plan_writer import render_analysis_output
@@ -103,6 +104,7 @@ def main(
     _ = argv
     settings = load_settings(env)
     if not settings.discord_token:
+        print('AICT2_DISCORD_TOKEN is not set.', file=sys.stderr)
         return 1
 
     runtime = build_runtime(settings)

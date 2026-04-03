@@ -23,37 +23,55 @@ def run_backtest_case(case: BacktestCase) -> BacktestCaseResult:
             validation_error=case.validation_error,
         )
 
-    snapshot = build_analysis_snapshot(
-        file_names=[path.name for path in case.analysis_paths],
-        file_paths=[str(path) for path in case.analysis_paths],
-        current_time=case.analysis_timestamp,
-        macro_state="Mixed",
-        vix=18.0,
-        bias=None,
-        daily_profile=None,
-        entry=0.0,
-        stop=0.0,
-        target=0.0,
-        memory_store=None,
-    )
+    try:
+        snapshot = build_analysis_snapshot(
+            file_names=[path.name for path in case.analysis_paths],
+            file_paths=[str(path) for path in case.analysis_paths],
+            current_time=case.analysis_timestamp,
+            macro_state="Mixed",
+            vix=18.0,
+            bias=None,
+            daily_profile=None,
+            entry=0.0,
+            stop=0.0,
+            target=0.0,
+            memory_store=None,
+        )
 
-    replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
+        replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
 
-    return BacktestCaseResult(
-        case_id=case.case_id,
-        instrument=snapshot.instrument,
-        ordered_timeframes=case.ordered_timeframes,
-        execution_timeframe=case.execution_timeframe,
-        analysis_timestamp=case.analysis_timestamp,
-        status=snapshot.status,
-        thesis_state=snapshot.thesis.state,
-        entry=snapshot.entry,
-        stop=snapshot.stop,
-        target=snapshot.target,
-        trade_outcome=replay.outcome if replay else None,
-        trade_score=replay.score if replay else None,
-        validation_error=None,
-    )
+        return BacktestCaseResult(
+            case_id=case.case_id,
+            instrument=snapshot.instrument,
+            ordered_timeframes=case.ordered_timeframes,
+            execution_timeframe=case.execution_timeframe,
+            analysis_timestamp=case.analysis_timestamp,
+            status=snapshot.status,
+            thesis_state=snapshot.thesis.state,
+            entry=snapshot.entry,
+            stop=snapshot.stop,
+            target=snapshot.target,
+            trade_outcome=replay.outcome if replay else None,
+            trade_score=replay.score if replay else None,
+            validation_error=None,
+        )
+    except Exception as exc:
+        return BacktestCaseResult(
+            case_id=case.case_id,
+            instrument=case.instrument,
+            ordered_timeframes=case.ordered_timeframes,
+            execution_timeframe=case.execution_timeframe,
+            analysis_timestamp=case.analysis_timestamp,
+            status=None,
+            thesis_state=None,
+            entry=None,
+            stop=None,
+            target=None,
+            trade_outcome=None,
+            trade_score=None,
+            validation_error=str(exc),
+            notes=("runtime_failure",),
+        )
 
 
 def summarize_results(results: list[BacktestCaseResult]) -> BacktestSummary:
@@ -63,6 +81,7 @@ def summarize_results(results: list[BacktestCaseResult]) -> BacktestSummary:
         total_cases=len(results),
         valid_cases=len(valid),
         invalid_cases=len(invalid),
+        watch_count=sum(result.status == "WATCH" for result in valid),
         wait_count=sum(result.status == "WAIT" for result in valid),
         no_trade_count=sum(result.status == "NO TRADE" for result in valid),
         live_setup_count=sum(result.status == "LIVE SETUP" for result in valid),

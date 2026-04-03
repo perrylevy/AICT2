@@ -157,6 +157,23 @@ def test_run_backtest_case_skips_replay_for_wait_status(tmp_path: Path, monkeypa
     assert result.trade_outcome is None
 
 
+def test_run_backtest_case_returns_failed_result_when_analysis_raises(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = _case(tmp_path)
+
+    def boom(**kwargs):
+        raise RuntimeError("snapshot failed")
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", boom)
+
+    result = run_backtest_case(case)
+
+    assert result.status is None
+    assert result.trade_outcome is None
+    assert result.validation_error == "snapshot failed"
+
+
 def test_summarize_results_tracks_status_and_trade_outcomes() -> None:
     summary = summarize_results(
         [
@@ -189,6 +206,20 @@ def test_summarize_results_tracks_status_and_trade_outcomes() -> None:
                 trade_score=1.0,
             ),
             BacktestCaseResult(
+                case_id="watch",
+                instrument="MNQ1!",
+                ordered_timeframes=("5M",),
+                execution_timeframe="5M",
+                analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+                status="WATCH",
+                thesis_state="bullish",
+                entry=20000.0,
+                stop=19990.0,
+                target=20035.0,
+                trade_outcome=None,
+                trade_score=None,
+            ),
+            BacktestCaseResult(
                 case_id="invalid",
                 instrument=None,
                 ordered_timeframes=(),
@@ -206,9 +237,10 @@ def test_summarize_results_tracks_status_and_trade_outcomes() -> None:
         ]
     )
 
-    assert summary.total_cases == 3
-    assert summary.valid_cases == 2
+    assert summary.total_cases == 4
+    assert summary.valid_cases == 3
     assert summary.invalid_cases == 1
     assert summary.wait_count == 1
     assert summary.live_setup_count == 1
+    assert summary.watch_count == 1
     assert summary.tp_hit_count == 1

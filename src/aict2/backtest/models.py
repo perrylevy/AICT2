@@ -47,6 +47,7 @@ class BacktestSummary:
     total_cases: int
     valid_cases: int
     invalid_cases: int
+    watch_count: int
     wait_count: int
     no_trade_count: int
     live_setup_count: int

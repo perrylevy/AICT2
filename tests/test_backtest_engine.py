@@ -8,8 +8,9 @@ from aict2.analysis.analysis_service import AnalysisSnapshot
 from aict2.analysis.risk_gate import RiskGateResult
 from aict2.analysis.session_lens import SessionLens
 from aict2.analysis.trade_thesis import TradeThesis
-from aict2.backtest.engine import run_backtest_case, summarize_results
+from aict2.backtest.engine import run_backtest_case, run_backtest_cases, summarize_results
 from aict2.backtest.models import BacktestCase, BacktestCaseResult, BacktestTradeReplay
+from aict2.backtest.scoring import replay_live_setup
 from aict2.io.chart_intake import ChartRequest
 
 ET = ZoneInfo("America/New_York")
@@ -29,7 +30,7 @@ def _write_csv(path: Path, rows: list[tuple[str, float, float, float, float]]) -
 def _case(tmp_path: Path) -> BacktestCase:
     analysis = tmp_path / "analysis"
     score = tmp_path / "score"
-    analysis.mkdir()
+    analysis.mkdir(parents=True)
     score.mkdir()
     execution = analysis / "CME_MINI_MNQ1!, 5.csv"
     _write_csv(
@@ -172,6 +173,54 @@ def test_run_backtest_case_returns_failed_result_when_analysis_raises(
     assert result.status is None
     assert result.trade_outcome is None
     assert result.validation_error == "snapshot failed"
+
+
+def test_run_backtest_cases_reuses_shared_memory_store(tmp_path: Path, monkeypatch) -> None:
+    first = _case(tmp_path / "first")
+    second = BacktestCase(
+        case_id="case-2",
+        case_path=tmp_path / "second",
+        analysis_paths=first.analysis_paths,
+        score_path=first.score_path,
+        instrument="MNQ1!",
+        ordered_timeframes=("1M",),
+        execution_timeframe="1M",
+        analysis_timestamp=datetime(2026, 4, 2, 10, 0, tzinfo=ET),
+        validation_error=None,
+    )
+    seen_memory_store: list[object] = []
+
+    def fake_build_analysis_snapshot(**kwargs):
+        seen_memory_store.append(kwargs["memory_store"])
+        return _snapshot(status="WATCH" if len(seen_memory_store) == 2 else "LIVE SETUP")
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", fake_build_analysis_snapshot)
+    monkeypatch.setattr(
+        "aict2.backtest.engine.replay_live_setup",
+        lambda case_arg, snapshot_arg: BacktestTradeReplay(outcome="TP_HIT", score=1.0),
+    )
+
+    results = run_backtest_cases([first, second])
+
+    assert len(results) == 2
+    assert all(memory_store is not None for memory_store in seen_memory_store)
+    assert seen_memory_store[0] is seen_memory_store[1]
+
+
+def test_replay_live_setup_starts_after_execution_timeframe(tmp_path: Path, monkeypatch) -> None:
+    case = _case(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_score_csv_against_records(csv_path, records):
+        captured["analyzed_at"] = records[0].analyzed_at
+        return []
+
+    monkeypatch.setattr("aict2.backtest.scoring.score_csv_against_records", fake_score_csv_against_records)
+
+    replay = replay_live_setup(case, _snapshot())
+
+    assert replay.outcome == "NO_SETUP"
+    assert captured["analyzed_at"] == datetime(2026, 4, 2, 10, 0, tzinfo=ET).isoformat()
 
 
 def test_summarize_results_tracks_status_and_trade_outcomes() -> None:

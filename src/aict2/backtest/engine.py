@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import gc
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from aict2.analysis.analysis_service import build_analysis_snapshot
 from aict2.backtest.models import BacktestCase, BacktestCaseResult, BacktestSummary
 from aict2.backtest.scoring import replay_live_setup
+from aict2.context.store import ContextStore
+from aict2.context.structural_memory import StructuralMemoryStore
 
 
-def run_backtest_case(case: BacktestCase) -> BacktestCaseResult:
+def run_backtest_case(
+    case: BacktestCase, memory_store: StructuralMemoryStore | None = None
+) -> BacktestCaseResult:
     if case.validation_error is not None:
         return BacktestCaseResult(
             case_id=case.case_id,
@@ -35,7 +43,7 @@ def run_backtest_case(case: BacktestCase) -> BacktestCaseResult:
             entry=0.0,
             stop=0.0,
             target=0.0,
-            memory_store=None,
+            memory_store=memory_store,
         )
 
         replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
@@ -72,6 +80,18 @@ def run_backtest_case(case: BacktestCase) -> BacktestCaseResult:
             validation_error=str(exc),
             notes=("runtime_failure",),
         )
+
+
+def run_backtest_cases(cases: list[BacktestCase]) -> list[BacktestCaseResult]:
+    with TemporaryDirectory() as temp_dir:
+        context_store = ContextStore(db_path=(Path(temp_dir) / "backtest.db"))
+        context_store.initialize()
+        memory_store = StructuralMemoryStore(context_store)
+        results = [run_backtest_case(case, memory_store=memory_store) for case in cases]
+        memory_store = None
+        context_store = None
+        gc.collect()
+        return results
 
 
 def summarize_results(results: list[BacktestCaseResult]) -> BacktestSummary:

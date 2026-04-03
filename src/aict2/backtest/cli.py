@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from aict2.backtest.engine import run_backtest_case, summarize_results
+from aict2.backtest.engine import run_backtest_cases, summarize_results
 from aict2.backtest.loader import discover_backtest_cases
 
 
@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     cases = discover_backtest_cases(cases_dir)
-    results = [run_backtest_case(case) for case in cases]
+    results = run_backtest_cases(cases)
     summary = summarize_results(results)
 
     for result in results:

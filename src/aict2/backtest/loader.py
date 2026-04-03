@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from aict2.backtest.models import BacktestCase
 from aict2.io.chart_intake import build_chart_request
 from aict2.io.filename_parsing import parse_chart_file_name
+
+ET = ZoneInfo("America/New_York")
 
 
 def _load_frame(csv_path: Path) -> pd.DataFrame:
@@ -35,8 +38,12 @@ def _load_last_timestamp(csv_path: Path) -> datetime:
     time_column = next((column for column in frame.columns if column.lower() == "time"), None)
     if time_column is None:
         raise ValueError(f"Missing time column: {csv_path.name}")
-    timestamp = pd.to_datetime(frame[time_column].iloc[-1])
-    return timestamp.to_pydatetime()
+    timestamps = pd.to_datetime(frame[time_column])
+    if timestamps.dt.tz is None:
+        timestamps = timestamps.dt.tz_localize(ET)
+    else:
+        timestamps = timestamps.dt.tz_convert(ET)
+    return timestamps.max().to_pydatetime()
 
 
 def _discover_case(case_path: Path) -> BacktestCase:

@@ -329,3 +329,57 @@ def test_discover_backtest_cases_uses_execution_chart_timestamp_for_4h_15m_1m_bu
     assert len(cases) == 1
     assert cases[0].execution_timeframe == "1M"
     assert cases[0].analysis_timestamp == datetime(2026, 4, 2, 9, 59, tzinfo=ET)
+
+
+def test_discover_backtest_cases_uses_latest_execution_timestamp_when_rows_are_reversed(
+    tmp_path: Path,
+) -> None:
+    case = tmp_path / "reverse-rows"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [
+            ("2026-04-02T10:00:00-04:00", 20105, 20110, 20100, 20108),
+            ("2026-04-02T09:55:00-04:00", 20100, 20105, 20095, 20102),
+        ],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T10:01:00-04:00", 20108, 20110, 20105, 20109)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].analysis_timestamp == datetime(2026, 4, 2, 10, 0, tzinfo=ET)
+
+
+def test_discover_backtest_cases_localizes_naive_execution_timestamps_to_eastern(
+    tmp_path: Path,
+) -> None:
+    case = tmp_path / "naive-times"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    analysis_file = analysis / "CME_MINI_MNQ1!, 5.csv"
+    analysis_file.write_text(
+        "time,open,high,low,close\n"
+        "2026-04-02T09:55:00,20100,20105,20095,20102\n"
+        "2026-04-02T10:00:00,20102,20108,20100,20106\n",
+        encoding="utf-8",
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T10:01:00-04:00", 20106, 20110, 20105, 20108)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].analysis_timestamp == datetime(2026, 4, 2, 10, 0, tzinfo=ET)

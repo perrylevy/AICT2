@@ -26,6 +26,8 @@ def _discover_case(case_path: Path) -> BacktestCase:
     score_dir = case_path / "score"
     analysis_paths = tuple(sorted(analysis_dir.glob("*.csv")))
     score_paths = tuple(sorted(score_dir.glob("*.csv")))
+    if score_paths:
+        parse_chart_file_name(score_paths[0].name)
     request = build_chart_request([path.name for path in analysis_paths])
     execution_path = next(
         path

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from aict2.backtest.engine import run_backtest_case, summarize_results
@@ -11,8 +12,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m aict2.backtest")
     parser.add_argument("cases_dir", help="Directory containing per-case backtest folders")
     args = parser.parse_args(argv)
+    cases_dir = Path(args.cases_dir)
 
-    cases = discover_backtest_cases(Path(args.cases_dir))
+    if not cases_dir.is_dir():
+        print(f"Backtest cases directory not found: {cases_dir}", file=sys.stderr)
+        return 1
+
+    cases = discover_backtest_cases(cases_dir)
     results = [run_backtest_case(case) for case in cases]
     summary = summarize_results(results)
 
@@ -33,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
         f"tp_hit={summary.tp_hit_count} "
         f"sl_hit={summary.sl_hit_count} "
         f"no_entry={summary.no_entry_count} "
-        f"unresolved={summary.unresolved_count}"
+        f"unresolved={summary.unresolved_count} "
+        f"no_setup={summary.no_setup_count}"
     )
     return 0

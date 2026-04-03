@@ -152,3 +152,52 @@ def test_backtest_cli_reports_invalid_cases_without_crashing(
     assert exit_code == 0
     assert "bad-case" in output
     assert "Missing score directory" in output
+
+
+def test_backtest_cli_includes_no_setup_summary_count(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    case = tmp_path / "2026-04-02-0955"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 240.csv",
+        [("2026-04-02T08:00:00-04:00", 20000, 20020, 19980, 20010)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 15.csv",
+        [("2026-04-02T09:45:00-04:00", 20010, 20014, 20000, 20012)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T09:55:00-04:00", 20012, 20016, 20008, 20015)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T09:56:00-04:00", 20015, 20020, 20012, 20018)],
+    )
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", lambda **kwargs: _snapshot())
+    monkeypatch.setattr(
+        "aict2.backtest.engine.replay_live_setup",
+        lambda case_arg, snapshot_arg: BacktestTradeReplay(outcome="NO_SETUP", score=None),
+    )
+
+    exit_code = main([str(tmp_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "no_setup=1" in output
+
+
+def test_backtest_cli_returns_error_for_missing_root(tmp_path: Path, capsys) -> None:
+    missing_root = tmp_path / "missing-root"
+
+    exit_code = main([str(missing_root)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Backtest cases directory not found" in captured.err

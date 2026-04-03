@@ -111,3 +111,36 @@ def test_discover_backtest_cases_parses_score_filename(tmp_path: Path, monkeypat
     discover_backtest_cases(tmp_path)
 
     assert "CME_MINI_MNQ1!, 1.csv" in parsed_names
+
+
+def test_discover_backtest_cases_reads_score_csv_content(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = tmp_path / "2026-04-02-1000"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+    score_path = score / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        score_path,
+        [("2026-04-02T10:01:00-04:00", 20102, 20106, 20100, 20105)],
+    )
+
+    called_paths: list[Path] = []
+    original_read_csv = loader_module.pd.read_csv
+
+    def wrapped_read_csv(path, *args, **kwargs):
+        called_paths.append(Path(path))
+        return original_read_csv(path, *args, **kwargs)
+
+    monkeypatch.setattr(loader_module.pd, "read_csv", wrapped_read_csv)
+
+    discover_backtest_cases(tmp_path)
+
+    assert score_path in called_paths

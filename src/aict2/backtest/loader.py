@@ -10,8 +10,12 @@ from aict2.io.chart_intake import build_chart_request
 from aict2.io.filename_parsing import parse_chart_file_name
 
 
+def _load_frame(csv_path: Path) -> pd.DataFrame:
+    return pd.read_csv(csv_path)
+
+
 def _load_last_timestamp(csv_path: Path) -> datetime:
-    frame = pd.read_csv(csv_path)
+    frame = _load_frame(csv_path)
     if frame.empty:
         raise ValueError(f"Empty analysis chart: {csv_path.name}")
     time_column = next((column for column in frame.columns if column.lower() == "time"), None)
@@ -28,6 +32,7 @@ def _discover_case(case_path: Path) -> BacktestCase:
     score_paths = tuple(sorted(score_dir.glob("*.csv")))
     if score_paths:
         parse_chart_file_name(score_paths[0].name)
+        _load_frame(score_paths[0])
     request = build_chart_request([path.name for path in analysis_paths])
     execution_path = next(
         path

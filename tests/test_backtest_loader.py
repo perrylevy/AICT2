@@ -144,3 +144,105 @@ def test_discover_backtest_cases_reads_score_csv_content(
     discover_backtest_cases(tmp_path)
 
     assert score_path in called_paths
+
+
+def test_discover_backtest_cases_marks_missing_score_folder_invalid(tmp_path: Path) -> None:
+    case = tmp_path / "missing-score"
+    analysis = case / "analysis"
+    analysis.mkdir(parents=True)
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Missing score directory"
+
+
+def test_discover_backtest_cases_marks_multiple_score_csvs_invalid(tmp_path: Path) -> None:
+    case = tmp_path / "many-score-files"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T10:01:00-04:00", 20102, 20106, 20100, 20105)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1 (1).csv",
+        [("2026-04-02T10:02:00-04:00", 20105, 20107, 20101, 20106)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Expected exactly one score CSV"
+
+
+def test_discover_backtest_cases_rejects_non_one_minute_score_chart(tmp_path: Path) -> None:
+    case = tmp_path / "bad-score-timeframe"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 240.csv",
+        [("2026-04-02T08:00:00-04:00", 20000, 20020, 19980, 20010)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 15.csv",
+        [("2026-04-02T09:45:00-04:00", 20010, 20014, 20000, 20012)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T09:59:00-04:00", 20012, 20013, 20008, 20010)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20010, 20015, 20005, 20012)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Score chart must be 1M"
+
+
+def test_discover_backtest_cases_uses_execution_chart_timestamp_for_4h_15m_1m_bundle(
+    tmp_path: Path,
+) -> None:
+    case = tmp_path / "2026-04-02-0959"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 240.csv",
+        [("2026-04-02T08:00:00-04:00", 20000, 20020, 19980, 20010)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 15.csv",
+        [("2026-04-02T09:45:00-04:00", 20010, 20014, 20000, 20012)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T09:59:00-04:00", 20012, 20013, 20008, 20010)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T10:00:00-04:00", 20010, 20015, 20005, 20012)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].execution_timeframe == "1M"
+    assert cases[0].analysis_timestamp == datetime(2026, 4, 2, 9, 59, tzinfo=ET)

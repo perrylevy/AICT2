@@ -83,11 +83,15 @@ def run_backtest_case(
 
 
 def run_backtest_cases(cases: list[BacktestCase]) -> list[BacktestCaseResult]:
+    ordered_cases = sorted(
+        cases,
+        key=lambda case: (case.analysis_timestamp is None, case.analysis_timestamp, case.case_id),
+    )
     with TemporaryDirectory() as temp_dir:
         context_store = ContextStore(db_path=(Path(temp_dir) / "backtest.db"))
         context_store.initialize()
         memory_store = StructuralMemoryStore(context_store)
-        results = [run_backtest_case(case, memory_store=memory_store) for case in cases]
+        results = [run_backtest_case(case, memory_store=memory_store) for case in ordered_cases]
         memory_store = None
         context_store = None
         gc.collect()

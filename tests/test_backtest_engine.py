@@ -207,6 +207,48 @@ def test_run_backtest_cases_reuses_shared_memory_store(tmp_path: Path, monkeypat
     assert seen_memory_store[0] is seen_memory_store[1]
 
 
+def test_run_backtest_cases_orders_cases_by_analysis_timestamp(tmp_path: Path, monkeypatch) -> None:
+    late_case = _case(tmp_path / "late")
+    early_case = BacktestCase(
+        case_id="early",
+        case_path=tmp_path / "early",
+        analysis_paths=late_case.analysis_paths,
+        score_path=late_case.score_path,
+        instrument="MNQ1!",
+        ordered_timeframes=("5M",),
+        execution_timeframe="5M",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 50, tzinfo=ET),
+        validation_error=None,
+    )
+    seen_case_times: list[datetime] = []
+
+    def fake_run_backtest_case(case, memory_store=None):
+        seen_case_times.append(case.analysis_timestamp)
+        return BacktestCaseResult(
+            case_id=case.case_id,
+            instrument=case.instrument,
+            ordered_timeframes=case.ordered_timeframes,
+            execution_timeframe=case.execution_timeframe,
+            analysis_timestamp=case.analysis_timestamp,
+            status="WATCH",
+            thesis_state="mixed",
+            entry=None,
+            stop=None,
+            target=None,
+            trade_outcome=None,
+            trade_score=None,
+        )
+
+    monkeypatch.setattr("aict2.backtest.engine.run_backtest_case", fake_run_backtest_case)
+
+    run_backtest_cases([late_case, early_case])
+
+    assert seen_case_times == [
+        datetime(2026, 4, 2, 9, 50, tzinfo=ET),
+        datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+    ]
+
+
 def test_replay_live_setup_starts_after_execution_timeframe(tmp_path: Path, monkeypatch) -> None:
     case = _case(tmp_path)
     captured: dict[str, object] = {}

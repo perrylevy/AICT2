@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aict2"
+version = "0.1.0"
+description = "AICT v2 Discord bot for MNQ/NQ CSV-based intraday analysis"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "anthropic>=0.68.0",
+  "discord.py>=2.6.0",
+  "pandas>=2.3.0",
+  "yfinance>=0.2.66",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4.0",
+  "ruff>=0.12.0",
+]
+
+[project.scripts]
+aict2-bot = "aict2.bot.main:main"
+aict2-macro = "aict2.macro.publisher:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aict2"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

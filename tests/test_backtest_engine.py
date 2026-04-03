@@ -1,0 +1,214 @@
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from aict2.analysis.analysis_service import AnalysisSnapshot
+from aict2.analysis.risk_gate import RiskGateResult
+from aict2.analysis.session_lens import SessionLens
+from aict2.analysis.trade_thesis import TradeThesis
+from aict2.backtest.engine import run_backtest_case, summarize_results
+from aict2.backtest.models import BacktestCase, BacktestCaseResult, BacktestTradeReplay
+from aict2.io.chart_intake import ChartRequest
+
+ET = ZoneInfo("America/New_York")
+
+
+def _write_csv(path: Path, rows: list[tuple[str, float, float, float, float]]) -> None:
+    path.write_text(
+        "time,open,high,low,close\n"
+        + "\n".join(
+            f"{timestamp},{open_},{high},{low},{close}"
+            for timestamp, open_, high, low, close in rows
+        ),
+        encoding="utf-8",
+    )
+
+
+def _case(tmp_path: Path) -> BacktestCase:
+    analysis = tmp_path / "analysis"
+    score = tmp_path / "score"
+    analysis.mkdir()
+    score.mkdir()
+    execution = analysis / "CME_MINI_MNQ1!, 5.csv"
+    _write_csv(
+        execution,
+        [("2026-04-02T09:55:00-04:00", 20000, 20010, 19990, 20005)],
+    )
+    score_path = score / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        score_path,
+        [("2026-04-02T09:56:00-04:00", 20005, 20040, 20000, 20035)],
+    )
+    return BacktestCase(
+        case_id="case-1",
+        case_path=tmp_path,
+        analysis_paths=(execution,),
+        score_path=score_path,
+        instrument="MNQ1!",
+        ordered_timeframes=("5M",),
+        execution_timeframe="5M",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        validation_error=None,
+    )
+
+
+def _snapshot(status: str = "LIVE SETUP", state: str = "bullish") -> AnalysisSnapshot:
+    return AnalysisSnapshot(
+        instrument="MNQ1!",
+        request=ChartRequest(
+            instrument="MNQ1!",
+            mode="single",
+            ordered_timeframes=("5M",),
+            execution_timeframe="5M",
+            has_higher_timeframe_context=False,
+            bundle_profile="custom",
+            is_canonical_bundle=False,
+            source_files=("CME_MINI_MNQ1!, 5.csv",),
+        ),
+        thesis=TradeThesis(
+            state=state,
+            allowed_business="long_only",
+            daily_profile="continuation",
+            has_higher_timeframe_context=False,
+        ),
+        session=SessionLens(
+            macro_state="Mixed",
+            volatility_regime="normal",
+            active_windows=("ny_open_macro",),
+            session_phase="rth_morning",
+            analysis_window="Open Check (ideal)",
+        ),
+        risk=RiskGateResult(
+            stop_distance=10.0,
+            rr=2.0,
+            max_contracts=1,
+            clears_min_rr=True,
+        ),
+        status=status,
+        used_structural_memory=False,
+        entry=20000.0,
+        stop=19990.0,
+        target=20035.0,
+        liquidity_summary="PDH nearby",
+        reference_context="PDH 20040",
+        internal_reference_context="PDH 20040",
+        draw_on_liquidity="PDH 20040",
+        htf_reference="1H High 20040",
+        stop_run_summary="No confirmed stop run yet",
+        gap_summary="No active NDOG/NWOG",
+        gap_confluence="No gap confluence",
+        opening_summary="Opening levels unavailable from current upload",
+        opening_confluence="Opening prices are informational only right now.",
+        pd_array_summary="No clear PD array ranked yet",
+        pd_array_confluence="Daily arrays are informational only right now.",
+        entry_model="5M Confirmation",
+        tp_model="2R",
+        target_reason="Defaulting to a full 2R objective unless external liquidity is closer.",
+        needs_confirmation=False,
+        requires_retrace=False,
+        session_levels=None,
+    )
+
+
+def test_run_backtest_case_passes_only_analysis_paths_to_snapshot_builder(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = _case(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_build_analysis_snapshot(**kwargs):
+        captured["file_paths"] = kwargs["file_paths"]
+        captured["current_time"] = kwargs["current_time"]
+        return _snapshot()
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", fake_build_analysis_snapshot)
+    monkeypatch.setattr(
+        "aict2.backtest.engine.replay_live_setup",
+        lambda case_arg, snapshot_arg: BacktestTradeReplay(outcome="TP_HIT", score=1.0),
+    )
+
+    result = run_backtest_case(case)
+
+    assert result.status == "LIVE SETUP"
+    assert result.trade_outcome == "TP_HIT"
+    assert captured["file_paths"] == [str(path) for path in case.analysis_paths]
+    assert str(case.score_path) not in captured["file_paths"]
+    assert captured["current_time"] == case.analysis_timestamp
+
+
+def test_run_backtest_case_skips_replay_for_wait_status(tmp_path: Path, monkeypatch) -> None:
+    case = _case(tmp_path)
+
+    monkeypatch.setattr(
+        "aict2.backtest.engine.build_analysis_snapshot",
+        lambda **kwargs: _snapshot(status="WAIT", state="mixed"),
+    )
+
+    def fail_replay(case_arg, snapshot_arg):
+        raise AssertionError("replay should not run for WAIT")
+
+    monkeypatch.setattr("aict2.backtest.engine.replay_live_setup", fail_replay)
+
+    result = run_backtest_case(case)
+
+    assert result.status == "WAIT"
+    assert result.trade_outcome is None
+
+
+def test_summarize_results_tracks_status_and_trade_outcomes() -> None:
+    summary = summarize_results(
+        [
+            BacktestCaseResult(
+                case_id="wait",
+                instrument="MNQ1!",
+                ordered_timeframes=("5M",),
+                execution_timeframe="5M",
+                analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+                status="WAIT",
+                thesis_state="mixed",
+                entry=None,
+                stop=None,
+                target=None,
+                trade_outcome=None,
+                trade_score=None,
+            ),
+            BacktestCaseResult(
+                case_id="live-win",
+                instrument="MNQ1!",
+                ordered_timeframes=("5M",),
+                execution_timeframe="5M",
+                analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+                status="LIVE SETUP",
+                thesis_state="bullish",
+                entry=20000.0,
+                stop=19990.0,
+                target=20035.0,
+                trade_outcome="TP_HIT",
+                trade_score=1.0,
+            ),
+            BacktestCaseResult(
+                case_id="invalid",
+                instrument=None,
+                ordered_timeframes=(),
+                execution_timeframe=None,
+                analysis_timestamp=None,
+                status=None,
+                thesis_state=None,
+                entry=None,
+                stop=None,
+                target=None,
+                trade_outcome=None,
+                trade_score=None,
+                validation_error="Missing score directory",
+            ),
+        ]
+    )
+
+    assert summary.total_cases == 3
+    assert summary.valid_cases == 2
+    assert summary.invalid_cases == 1
+    assert summary.wait_count == 1
+    assert summary.live_setup_count == 1
+    assert summary.tp_hit_count == 1

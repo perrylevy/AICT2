@@ -56,12 +56,18 @@ def _discover_case(case_path: Path) -> BacktestCase:
         return _invalid_case(case_path, "Expected exactly one score CSV")
 
     try:
-        _, score_timeframe = parse_chart_file_name(score_paths[0].name)
+        score_instrument, score_timeframe = parse_chart_file_name(score_paths[0].name)
         if score_timeframe != "1M":
             return _invalid_case(case_path, "Score chart must be 1M")
         _load_frame(score_paths[0])
 
+        analysis_chart_details = [parse_chart_file_name(path.name) for path in analysis_paths]
+        if len({timeframe for _, timeframe in analysis_chart_details}) != len(analysis_chart_details):
+            return _invalid_case(case_path, "Duplicate analysis timeframes are not supported")
+
         request = build_chart_request([path.name for path in analysis_paths])
+        if request.instrument != score_instrument:
+            return _invalid_case(case_path, "Mixed instruments across analysis and score charts")
         execution_path = next(
             (
                 path
@@ -84,7 +90,7 @@ def _discover_case(case_path: Path) -> BacktestCase:
             analysis_timestamp=_load_last_timestamp(execution_path),
             validation_error=None,
         )
-    except ValueError as exc:
+    except Exception as exc:
         return _invalid_case(case_path, str(exc))
 
 

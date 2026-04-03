@@ -215,6 +215,89 @@ def test_discover_backtest_cases_rejects_non_one_minute_score_chart(tmp_path: Pa
     assert cases[0].validation_error == "Score chart must be 1M"
 
 
+def test_discover_backtest_cases_rejects_mixed_score_instrument(tmp_path: Path) -> None:
+    case = tmp_path / "mixed-instrument-score"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+    _write_csv(
+        score / "CME_MINI_ES1!, 1.csv",
+        [("2026-04-02T10:01:00-04:00", 5010, 5015, 5005, 5012)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Mixed instruments across analysis and score charts"
+
+
+def test_discover_backtest_cases_rejects_duplicate_timeframe_bundle(tmp_path: Path) -> None:
+    case = tmp_path / "duplicate-timeframes"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1D.csv",
+        [("2026-04-01T16:00:00-04:00", 20000, 20100, 19950, 20080)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1D (1).csv",
+        [("2026-04-02T16:00:00-04:00", 20080, 20120, 20010, 20100)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T10:01:00-04:00", 20102, 20106, 20100, 20105)],
+    )
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Duplicate analysis timeframes are not supported"
+
+
+def test_discover_backtest_cases_preserves_read_errors_as_invalid_cases(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = tmp_path / "score-read-error"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T10:00:00-04:00", 20100, 20105, 20095, 20102)],
+    )
+    score_path = score / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        score_path,
+        [("2026-04-02T10:01:00-04:00", 20102, 20106, 20100, 20105)],
+    )
+
+    original_load_frame = loader_module._load_frame
+
+    def wrapped_load_frame(path: Path):
+        if Path(path) == score_path:
+            raise OSError("Unable to read score csv")
+        return original_load_frame(path)
+
+    monkeypatch.setattr(loader_module, "_load_frame", wrapped_load_frame)
+
+    cases = discover_backtest_cases(tmp_path)
+
+    assert len(cases) == 1
+    assert cases[0].validation_error == "Unable to read score csv"
+
+
 def test_discover_backtest_cases_uses_execution_chart_timestamp_for_4h_15m_1m_bundle(
     tmp_path: Path,
 ) -> None:

@@ -65,6 +65,7 @@ def build_macro_inputs_from_messages(
             fear_greed_score if fear_greed_score is not None else fallback.fear_greed_score
         ),
         vix=vix if vix is not None else fallback.vix,
+        vix_source='market-news' if vix is not None else fallback.vix_source,
         put_call_ratio=put_call_ratio if put_call_ratio is not None else fallback.put_call_ratio,
         tone_trend=tone_trend(headline_signals, fallback.tone_trend),
         major_event_active=major_event_label is not None,

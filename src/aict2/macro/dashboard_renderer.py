@@ -7,6 +7,7 @@ def render_macro_dashboard(score: MacroScore) -> str:
     lines = [
         f'Macro Label: {score.label}',
         f'Score: {score.score}',
+        f'VIX: {score.vix:.2f} ({score.vix_source})',
         f'Volatility Regime: {score.volatility_regime}',
         f'Event Risk: {score.event_risk}',
     ]

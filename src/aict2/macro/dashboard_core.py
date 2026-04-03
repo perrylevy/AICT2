@@ -13,12 +13,15 @@ class MacroInputs:
     tone_trend: str
     major_event_active: bool
     major_event_label: str | None
+    vix_source: str = 'fallback'
 
 
 @dataclass(frozen=True, slots=True)
 class MacroScore:
     score: int
     label: str
+    vix: float
+    vix_source: str
     volatility_regime: str
     event_risk: str
     override_reason: str | None
@@ -88,6 +91,8 @@ def score_macro_dashboard(inputs: MacroInputs) -> MacroScore:
     return MacroScore(
         score=score,
         label=label,
+        vix=inputs.vix,
+        vix_source=inputs.vix_source,
         volatility_regime=volatility_regime,
         event_risk=event_risk,
         override_reason=override_reason,

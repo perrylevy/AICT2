@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from aict2.macro.dashboard_core import MacroInputs
 from aict2.macro.live_cycle import with_live_vix
-from aict2.macro.vix_source import fetch_live_vix, parse_vix_from_html
+from aict2.macro.vix_source import VixReading, fetch_live_vix, parse_vix_from_html
 
 
 def test_parse_vix_from_html_reads_spot_price_when_number_precedes_label() -> None:
@@ -36,15 +38,20 @@ def test_with_live_vix_overrides_existing_input_when_fetch_succeeds() -> None:
         bear_percent=50.0,
         fear_greed_score=50.0,
         vix=18.0,
+        vix_source="fallback",
         put_call_ratio=0.75,
         tone_trend="stable",
         major_event_active=False,
         major_event_label=None,
     )
 
-    updated = with_live_vix(inputs, vix_fetcher=lambda: 24.6)
+    updated = with_live_vix(
+        inputs,
+        vix_fetcher=lambda: VixReading(value=24.6, source="cboe"),
+    )
 
     assert updated.vix == 24.6
+    assert updated.vix_source == "cboe"
     assert updated.bull_percent == 50.0
 
 
@@ -54,6 +61,7 @@ def test_with_live_vix_keeps_existing_value_when_fetch_fails() -> None:
         bear_percent=50.0,
         fear_greed_score=50.0,
         vix=18.0,
+        vix_source="fallback",
         put_call_ratio=0.75,
         tone_trend="stable",
         major_event_active=False,
@@ -77,7 +85,34 @@ def test_fetch_live_vix_uses_yfinance_fallback_when_cboe_parse_fails() -> None:
 
     value = fetch_live_vix(
         html_loader=lambda url: "<html>No spot price here</html>",
+        yahoo_chart_loader=lambda url: {},
         yfinance_ticker_factory=fake_ticker,
     )
 
-    assert value == 24.6
+    assert value == VixReading(value=24.6, source="yfinance")
+
+
+def test_fetch_live_vix_uses_yahoo_chart_before_yfinance() -> None:
+    payload = {
+        "chart": {
+            "result": [
+                {
+                    "indicators": {
+                        "quote": [
+                            {
+                                "close": [23.1, 23.87],
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+
+    value = fetch_live_vix(
+        html_loader=lambda url: "<html>No spot price here</html>",
+        yahoo_chart_loader=lambda url: json.loads(json.dumps(payload)),
+        yfinance_ticker_factory=lambda symbol: None,
+    )
+
+    assert value == VixReading(value=23.87, source="yahoo-chart")

@@ -14,14 +14,14 @@ from aict2.macro.dashboard_core import MacroInputs, score_macro_dashboard
 from aict2.macro.dashboard_renderer import build_dashboard_payload
 from aict2.macro.market_news import load_macro_inputs_from_channel
 from aict2.macro.settings import MacroPublishSettings
-from aict2.macro.vix_source import fetch_live_vix
+from aict2.macro.vix_source import VixReading, fetch_live_vix
 
 ET = ZoneInfo('America/New_York')
 
 ChannelResolver = Callable[[discord.Client, int | None, str], Any | None]
 NowProvider = Callable[[], datetime]
 HistoryInputLoader = Callable[[Any, datetime, MacroInputs], Awaitable[MacroInputs]]
-VixFetcher = Callable[[], float | None]
+VixFetcher = Callable[[], VixReading | None]
 ClientFactory = Callable[[MacroPublishSettings, MacroInputs], object]
 
 
@@ -38,10 +38,16 @@ def _default_channel_resolver(
 
 
 def with_live_vix(inputs: MacroInputs, *, vix_fetcher: VixFetcher = fetch_live_vix) -> MacroInputs:
-    live_vix = vix_fetcher()
-    if live_vix is None:
+    reading = vix_fetcher()
+    if reading is None:
         return inputs
-    return replace(inputs, vix=live_vix)
+    return replace(inputs, vix=reading.value, vix_source=reading.source)
+
+
+def with_stored_vix(inputs: MacroInputs, snapshot: MacroSnapshot | None) -> MacroInputs:
+    if snapshot is None or inputs.vix_source != "fallback":
+        return inputs
+    return replace(inputs, vix=snapshot.vix, vix_source="stored")
 
 
 class LiveMacroPublisherClient(discord.Client):
@@ -87,19 +93,21 @@ class LiveMacroPublisherClient(discord.Client):
                 )
 
             now = self._now_provider()
+            context_store = ContextStore(self._settings.db_path)
+            context_store.initialize()
+            macro_store = MacroSnapshotStore(context_store)
+            latest_snapshot = macro_store.load_latest()
             inputs = await self._input_loader(
                 market_news_channel,
                 now=now,
                 fallback=self._fallback_inputs,
             )
+            inputs = with_stored_vix(inputs, latest_snapshot)
             inputs = with_live_vix(inputs, vix_fetcher=self._vix_fetcher)
             score = score_macro_dashboard(inputs)
             payload = build_dashboard_payload(score)
             await dashboard_channel.send(str(payload.get('body', '')))
 
-            context_store = ContextStore(self._settings.db_path)
-            context_store.initialize()
-            macro_store = MacroSnapshotStore(context_store)
             macro_store.save_latest(
                 MacroSnapshot(
                     macro_state=score.label,

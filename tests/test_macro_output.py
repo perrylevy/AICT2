@@ -11,6 +11,7 @@ def test_render_macro_dashboard_includes_key_sections() -> None:
             bear_percent=65.0,
             fear_greed_score=24.0,
             vix=22.4,
+            vix_source="cboe",
             put_call_ratio=0.96,
             tone_trend='worsening',
             major_event_active=False,
@@ -22,6 +23,7 @@ def test_render_macro_dashboard_includes_key_sections() -> None:
 
     assert 'Macro Label: Risk-Off' in output
     assert 'Score:' in output
+    assert 'VIX: 22.40 (cboe)' in output
     assert 'Volatility Regime: high' in output
     assert 'Event Risk: normal' in output
 
@@ -33,6 +35,7 @@ def test_build_dashboard_payload_preserves_override_reason() -> None:
             bear_percent=45.0,
             fear_greed_score=55.0,
             vix=17.0,
+            vix_source="fallback",
             put_call_ratio=0.68,
             tone_trend='stable',
             major_event_active=True,

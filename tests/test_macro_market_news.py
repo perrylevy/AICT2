@@ -105,6 +105,7 @@ def test_build_macro_inputs_from_messages_uses_latest_signals_and_trend() -> Non
             bear_percent=50.0,
             fear_greed_score=50.0,
             vix=22.4,
+            vix_source="fallback",
             put_call_ratio=0.75,
             tone_trend="stable",
             major_event_active=False,
@@ -116,6 +117,7 @@ def test_build_macro_inputs_from_messages_uses_latest_signals_and_trend() -> Non
     assert inputs.bear_percent == 56.0
     assert inputs.fear_greed_score == 28.0
     assert inputs.vix == 22.4
+    assert inputs.vix_source == "fallback"
     assert inputs.put_call_ratio == 0.91
     assert inputs.tone_trend == "improving"
     assert inputs.major_event_active is True
@@ -140,6 +142,7 @@ def test_build_macro_inputs_from_messages_flags_urgent_news_override() -> None:
             bear_percent=48.0,
             fear_greed_score=55.0,
             vix=18.5,
+            vix_source="fallback",
             put_call_ratio=0.71,
             tone_trend="stable",
             major_event_active=False,
@@ -151,6 +154,7 @@ def test_build_macro_inputs_from_messages_flags_urgent_news_override() -> None:
     assert inputs.major_event_label is not None
     assert "Tariff escalation" in inputs.major_event_label
     assert inputs.vix == 18.5
+    assert inputs.vix_source == "fallback"
 
 
 def test_build_macro_inputs_from_messages_can_parse_vix_from_text_content() -> None:
@@ -170,6 +174,7 @@ def test_build_macro_inputs_from_messages_can_parse_vix_from_text_content() -> N
             bear_percent=50.0,
             fear_greed_score=50.0,
             vix=18.0,
+            vix_source="fallback",
             put_call_ratio=0.75,
             tone_trend="stable",
             major_event_active=False,
@@ -178,6 +183,7 @@ def test_build_macro_inputs_from_messages_can_parse_vix_from_text_content() -> N
     )
 
     assert inputs.vix == 24.6
+    assert inputs.vix_source == "market-news"
 
 
 def test_load_macro_inputs_from_channel_reads_async_history() -> None:
@@ -204,6 +210,7 @@ def test_load_macro_inputs_from_channel_reads_async_history() -> None:
                 bear_percent=50.0,
                 fear_greed_score=50.0,
                 vix=18.0,
+                vix_source="fallback",
                 put_call_ratio=0.75,
                 tone_trend="stable",
                 major_event_active=False,

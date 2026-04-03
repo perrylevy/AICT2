@@ -60,6 +60,7 @@ def load_macro_inputs(env: Mapping[str, str] | None = None) -> MacroInputs:
         bear_percent=float(source.get('AICT2_MACRO_BEAR_PERCENT', '50')),
         fear_greed_score=float(source.get('AICT2_MACRO_FEAR_GREED', '50')),
         vix=float(source.get('AICT2_MACRO_VIX', '18')),
+        vix_source='fallback',
         put_call_ratio=float(source.get('AICT2_MACRO_PUT_CALL', '0.75')),
         tone_trend=source.get('AICT2_MACRO_TONE_TREND', 'stable'),
         major_event_active=source.get('AICT2_MAJOR_EVENT_ACTIVE', '').strip().lower()

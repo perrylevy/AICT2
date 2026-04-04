@@ -149,6 +149,19 @@ def _resolve_scalp_invalidation_price(
     prior = recent.iloc[-2] if len(recent) >= 2 else latest
     normalized_entry_model = entry_model.lower()
 
+    if bias == 'bullish' and fact.sell_side_sweep:
+        return (
+            fact.latest_swing_low
+            if fact.latest_swing_low is not None
+            else float(recent['low'].min())
+        )
+    if bias == 'bearish' and fact.buy_side_sweep:
+        return (
+            fact.latest_swing_high
+            if fact.latest_swing_high is not None
+            else float(recent['high'].max())
+        )
+
     if 'ifvg' in normalized_entry_model:
         if bias == 'bullish':
             return max(float(prior['high']), min(float(latest['open']), float(latest['close'])))
@@ -224,6 +237,45 @@ def _resolve_scalp_target(
     if distance > SCALP_TARGET_MAX:
         return round_tick(default_target)
     return None
+
+
+def _resolve_structure_target_and_tp_model(
+    *,
+    entry: float,
+    stop: float,
+    bias: str,
+    draw_on_liquidity: str,
+) -> tuple[float, str, str]:
+    risk = abs(entry - stop)
+    if risk <= 0 or bias not in {'bullish', 'bearish'}:
+        return entry, '2R', 'Defaulting to a full 2R objective unless external liquidity is closer.'
+
+    two_r_target = entry + (risk * 2.0) if bias == 'bullish' else entry - (risk * 2.0)
+    liquidity_target = _extract_price(draw_on_liquidity)
+    if liquidity_target is None:
+        return (
+            two_r_target,
+            '2R',
+            'Defaulting to a full 2R objective unless external liquidity is closer.',
+        )
+
+    if bias == 'bullish' and entry < liquidity_target < two_r_target:
+        return (
+            liquidity_target,
+            'Draw on Liquidity',
+            'External liquidity caps the trade before a full 2R expansion.',
+        )
+    if bias == 'bearish' and entry > liquidity_target > two_r_target:
+        return (
+            liquidity_target,
+            'Draw on Liquidity',
+            'External liquidity caps the trade before a full 2R expansion.',
+        )
+    return (
+        two_r_target,
+        '2R',
+        'A full 2R objective comes before the next meaningful external liquidity target.',
+    )
 
 
 def _derive_structure_trade_levels(
@@ -356,29 +408,18 @@ def derive_trade_levels(
         )
 
     entry, stop, target = _derive_structure_trade_levels(execution_frame, bias, fact)
-    risk = abs(entry - stop)
-    if risk <= 0:
-        return (
-            entry,
-            stop,
-            target,
-            '2R',
-            'Defaulting to a full 2R objective unless external liquidity is closer.',
-        )
-    if abs(target - entry) >= risk * 1.95 and abs(target - entry) <= risk * 2.05:
-        return (
-            entry,
-            stop,
-            target,
-            '2R',
-            'A full 2R objective comes before the next meaningful external liquidity target.',
-        )
+    target, tp_model, target_reason = _resolve_structure_target_and_tp_model(
+        entry=entry,
+        stop=stop,
+        bias=bias,
+        draw_on_liquidity=draw_on_liquidity,
+    )
     return (
         entry,
         stop,
         target,
-        'Draw on Liquidity',
-        'External liquidity caps the trade before a full 2R expansion.',
+        tp_model,
+        target_reason,
     )
 
 

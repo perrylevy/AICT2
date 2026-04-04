@@ -269,6 +269,57 @@ def test_resolve_confirmation_requirement_still_requires_confirmation_for_weak_c
     )
 
 
+def test_resolve_confirmation_requirement_allows_mixed_context_ifvg_override() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.6,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            entry_model="5M IFVG",
+        )
+        is False
+    )
+
+
+def test_resolve_confirmation_requirement_keeps_mixed_context_wait_without_named_trigger() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.8,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            entry_model="5M/15M Confirmation",
+        )
+        is True
+    )
+
+
+def test_resolve_confirmation_requirement_allows_aligned_reversal_ifvg_without_stop_run() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=False,
+            stop_run_confirmed=False,
+            daily_profile="reversal",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_displacement=1.5,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            entry_model="5M IFVG",
+        )
+        is False
+    )
+
+
 def test_derive_setup_plan_prefers_4h_fvg_as_htf_reference_before_swing_levels(
     tmp_path: Path,
 ) -> None:

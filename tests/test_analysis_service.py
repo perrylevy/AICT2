@@ -15,6 +15,17 @@ from aict2.io.chart_intake import build_chart_request
 ET = ZoneInfo('America/New_York')
 
 
+def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]]) -> None:
+    path.write_text(
+        'time,open,high,low,close\n'
+        + '\n'.join(
+            f'{timestamp},{open_},{high},{low},{close}'
+            for timestamp, open_, high, low, close in rows
+        ),
+        encoding='utf-8',
+    )
+
+
 def test_build_analysis_snapshot_for_multi_chart_setup_saves_memory(tmp_path: Path) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
     context_store.initialize()
@@ -264,3 +275,63 @@ def test_derive_status_prioritizes_severely_bad_rr_over_wait_conditions() -> Non
 
     assert risk.rr < 1.0
     assert status == 'NO TRADE'
+
+
+def test_build_analysis_snapshot_allows_aligned_reversal_ifvg_live_setup_after_confirmation_tuning(
+    tmp_path: Path,
+) -> None:
+    context_store = ContextStore(tmp_path / 'aict2.db')
+    context_store.initialize()
+    memory_store = StructuralMemoryStore(context_store)
+    chart_daily = tmp_path / 'CME_MINI_MNQ1!, 1D.csv'
+    chart_1h = tmp_path / 'CME_MINI_MNQ1!, 60.csv'
+    chart_5 = tmp_path / 'CME_MINI_MNQ1!, 5.csv'
+
+    _write_chart(
+        chart_daily,
+        [
+            ('2026-03-31T00:00:00-04:00', 23960.0, 24020.0, 23920.0, 23980.0),
+            ('2026-04-01T00:00:00-04:00', 24050.0, 24110.0, 24000.0, 24090.0),
+            ('2026-04-02T00:00:00-04:00', 24120.0, 24210.0, 24090.0, 24180.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ('2026-04-02T07:00:00-04:00', 24080.0, 24100.0, 24040.0, 24090.0),
+            ('2026-04-02T08:00:00-04:00', 24090.0, 24140.0, 24070.0, 24120.0),
+            ('2026-04-02T09:00:00-04:00', 24120.0, 24200.0, 24100.0, 24190.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ('2026-04-02T09:10:00-04:00', 24080.0, 24090.0, 24070.0, 24078.0),
+            ('2026-04-02T09:15:00-04:00', 24078.0, 24082.0, 24060.0, 24064.0),
+            ('2026-04-02T09:20:00-04:00', 24064.0, 24070.0, 24050.0, 24054.0),
+            ('2026-04-02T09:25:00-04:00', 24054.0, 24058.0, 24040.0, 24044.0),
+            ('2026-04-02T09:30:00-04:00', 24044.0, 24042.0, 24020.0, 24024.0),
+            ('2026-04-02T09:35:00-04:00', 24024.0, 24080.0, 24022.0, 24078.0),
+            ('2026-04-02T09:40:00-04:00', 24078.0, 24150.0, 24076.0, 24128.0),
+        ],
+    )
+
+    snapshot = build_analysis_snapshot(
+        file_names=[chart_daily.name, chart_1h.name, chart_5.name],
+        file_paths=[str(chart_daily), str(chart_1h), str(chart_5)],
+        current_time=datetime(2026, 4, 2, 9, 40, tzinfo=ET),
+        macro_state='Mixed',
+        vix=18.0,
+        bias=None,
+        daily_profile=None,
+        entry=0.0,
+        stop=0.0,
+        target=0.0,
+        memory_store=memory_store,
+    )
+
+    assert snapshot.entry_model == '5M IFVG'
+    assert snapshot.thesis.state == 'bullish'
+    assert snapshot.requires_retrace is False
+    assert snapshot.needs_confirmation is False
+    assert snapshot.status == 'LIVE SETUP'

@@ -5,7 +5,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aict2.analysis.analysis_service import _derive_status, build_analysis_snapshot
-from aict2.analysis.market_map import ChartDerivedPlan
 from aict2.context.store import ContextStore
 from aict2.context.structural_memory import StructuralMemorySnapshot, StructuralMemoryStore
 from aict2.analysis.risk_gate import evaluate_risk_gate
@@ -398,49 +397,53 @@ def test_build_analysis_snapshot_allows_mixed_htf_when_5m_ifvg_is_clean_after_co
     assert snapshot.status == 'LIVE SETUP'
 
 
-def test_build_analysis_snapshot_promotes_directional_scalp_plan_to_live_setup(
-    tmp_path: Path, monkeypatch
+def test_build_analysis_snapshot_marks_clear_directional_scalp_as_live_setup(
+    tmp_path: Path,
 ) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
     context_store.initialize()
     memory_store = StructuralMemoryStore(context_store)
+    chart_daily = tmp_path / 'CME_MINI_MNQ1!, 1D.csv'
+    chart_1h = tmp_path / 'CME_MINI_MNQ1!, 60.csv'
+    chart_5 = tmp_path / 'CME_MINI_MNQ1!, 5.csv'
 
-    monkeypatch.setattr(
-        'aict2.analysis.analysis_service.derive_chart_plan',
-        lambda _paths: ChartDerivedPlan(
-            bias='bearish',
-            daily_profile='continuation',
-            entry=25310.0,
-            stop=25296.0,
-            target=25266.0,
-            liquidity_summary='Buy-side liquidity sweep above 25318.00 with bearish close-back-in',
-            reference_context='PDH 25440.00 / PDL 25220.00',
-            internal_reference_context='PDH 25440.00 / PDL 25220.00',
-            draw_on_liquidity='PDL 25266.00',
-            htf_reference='1H Bearish IFVG 25320.00-25328.00 (CE 25324.00)',
-            stop_run_summary='Confirmed stop run: Buy-side liquidity sweep above 25318.00 with bearish close-back-in',
-            gap_summary='No active NDOG/NWOG',
-            gap_confluence='No gap confluence',
-            opening_summary='True Day Open 25342.00',
-            opening_confluence='Opening prices support continuation lower.',
-            pd_array_summary='Execution: 5M Bearish IFVG 25314.00-25320.00 (CE 25317.00)',
-            pd_array_confluence='Execution arrays support continuation lower.',
-            entry_model='5M IFVG',
-            tp_model='Scalp Liquidity',
-            target_reason='Nearest execution liquidity fits the 40-50 point scalp band.',
-            needs_confirmation=False,
-            requires_retrace=False,
-        ),
+    _write_chart(
+        chart_daily,
+        [
+            ('2026-03-31T00:00:00-04:00', 24220.0, 24240.0, 24140.0, 24160.0),
+            ('2026-04-01T00:00:00-04:00', 24160.0, 24180.0, 24080.0, 24100.0),
+            ('2026-04-02T00:00:00-04:00', 24100.0, 24120.0, 24020.0, 24040.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ('2026-04-02T07:00:00-04:00', 24080.0, 24100.0, 24040.0, 24090.0),
+            ('2026-04-02T08:00:00-04:00', 24090.0, 24140.0, 24070.0, 24120.0),
+            ('2026-04-02T09:00:00-04:00', 24120.0, 24200.0, 24100.0, 24190.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ('2026-04-02T09:10:00-04:00', 24080.0, 24084.0, 24074.0, 24078.0),
+            ('2026-04-02T09:15:00-04:00', 24078.0, 24080.0, 24070.0, 24072.0),
+            ('2026-04-02T09:20:00-04:00', 24072.0, 24074.0, 24064.0, 24066.0),
+            ('2026-04-02T09:25:00-04:00', 24066.0, 24068.0, 24058.0, 24060.0),
+            ('2026-04-02T09:30:00-04:00', 24060.0, 24056.0, 24050.0, 24052.0),
+            ('2026-04-02T09:35:00-04:00', 24052.0, 24078.0, 24050.0, 24074.0),
+            ('2026-04-02T09:40:00-04:00', 24074.0, 24108.0, 24072.0, 24092.0),
+        ],
     )
 
     snapshot = build_analysis_snapshot(
         file_names=[
-            'CME_MINI_MNQ1!, 1D.csv',
-            'CME_MINI_MNQ1!, 60.csv',
-            'CME_MINI_MNQ1!, 5.csv',
+            chart_daily.name,
+            chart_1h.name,
+            chart_5.name,
         ],
-        file_paths=['daily.csv', 'hour.csv', 'five.csv'],
-        current_time=datetime(2026, 4, 3, 9, 40, tzinfo=ET),
+        file_paths=[str(chart_daily), str(chart_1h), str(chart_5)],
+        current_time=datetime(2026, 4, 2, 9, 40, tzinfo=ET),
         macro_state='Mixed',
         vix=18.0,
         bias=None,
@@ -452,51 +455,62 @@ def test_build_analysis_snapshot_promotes_directional_scalp_plan_to_live_setup(
     )
 
     assert snapshot.status == 'LIVE SETUP'
+    assert snapshot.entry_model == '5M IFVG'
+    assert snapshot.entry > snapshot.stop
+    assert snapshot.entry - snapshot.stop <= 15.0
+    assert 40.0 <= snapshot.target - snapshot.entry <= 50.0
 
 
-def test_build_analysis_snapshot_marks_mature_wide_scalp_plan_as_no_trade(
-    tmp_path: Path, monkeypatch
+def test_build_analysis_snapshot_rejects_mature_but_invalid_wide_scalp_plan(
+    tmp_path: Path,
 ) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
     context_store.initialize()
     memory_store = StructuralMemoryStore(context_store)
+    chart_daily = tmp_path / 'CME_MINI_MNQ1!, 1D.csv'
+    chart_1h = tmp_path / 'CME_MINI_MNQ1!, 60.csv'
+    chart_5 = tmp_path / 'CME_MINI_MNQ1!, 5.csv'
 
-    monkeypatch.setattr(
-        'aict2.analysis.analysis_service.derive_chart_plan',
-        lambda _paths: ChartDerivedPlan(
-            bias='bullish',
-            daily_profile='continuation',
-            entry=25610.0,
-            stop=25490.0,
-            target=25655.0,
-            liquidity_summary='Buy-side reclaim through recent swing high 25546.75',
-            reference_context='PDH 26019.00 / PDL 25180.25',
-            internal_reference_context='PDH 26019.00 / PDL 25180.25',
-            draw_on_liquidity='PDH 25655.00',
-            htf_reference='1H Bullish IFVG 25739.50-25757.75 (CE 25748.50)',
-            stop_run_summary='No confirmed stop run at the selected draw on liquidity yet',
-            gap_summary='No active NDOG/NWOG',
-            gap_confluence='No gap confluence',
-            opening_summary='True Day Open 25582.00',
-            opening_confluence='Opening prices support continuation higher.',
-            pd_array_summary='Execution: 5M Bullish IFVG 25588.00-25596.00 (CE 25592.00)',
-            pd_array_confluence='Execution arrays support continuation higher.',
-            entry_model='5M IFVG',
-            tp_model='Scalp Liquidity',
-            target_reason='Nearest execution liquidity is too close for acceptable RR.',
-            needs_confirmation=False,
-            requires_retrace=False,
-        ),
+    _write_chart(
+        chart_daily,
+        [
+            ('2026-02-01T00:00:00-05:00', 25520.0, 26019.0, 25180.0, 25640.0),
+            ('2026-02-02T00:00:00-05:00', 25640.0, 25688.0, 25596.0, 25613.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ('2026-02-02T08:00:00-05:00', 25505.0, 25560.0, 25495.0, 25556.0),
+            ('2026-02-02T09:00:00-05:00', 25556.0, 25613.0, 25544.0, 25613.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ('2026-02-02T08:45:00-05:00', 25498.0, 25520.0, 25492.25, 25505.0),
+            ('2026-02-02T08:50:00-05:00', 25505.0, 25530.0, 25498.0, 25518.0),
+            ('2026-02-02T08:55:00-05:00', 25518.0, 25544.0, 25510.0, 25540.0),
+            ('2026-02-02T09:00:00-05:00', 25540.0, 25552.0, 25530.0, 25536.0),
+            ('2026-02-02T09:05:00-05:00', 25536.0, 25544.0, 25520.0, 25528.0),
+            ('2026-02-02T09:10:00-05:00', 25528.0, 25536.0, 25514.0, 25518.0),
+            ('2026-02-02T09:15:00-05:00', 25518.0, 25534.0, 25510.0, 25530.0),
+            ('2026-02-02T09:20:00-05:00', 25530.0, 25548.0, 25522.0, 25542.0),
+            ('2026-02-02T09:25:00-05:00', 25542.0, 25570.0, 25538.0, 25564.0),
+            ('2026-02-02T09:30:00-05:00', 25564.0, 25588.0, 25542.0, 25584.0),
+            ('2026-02-02T09:35:00-05:00', 25584.0, 25613.0, 25580.0, 25613.0),
+            ('2026-02-02T09:40:00-05:00', 25613.0, 25616.0, 25596.0, 25613.0),
+        ],
     )
 
     snapshot = build_analysis_snapshot(
         file_names=[
-            'CME_MINI_MNQ1!, 1D.csv',
-            'CME_MINI_MNQ1!, 60.csv',
-            'CME_MINI_MNQ1!, 5.csv',
+            chart_daily.name,
+            chart_1h.name,
+            chart_5.name,
         ],
-        file_paths=['daily.csv', 'hour.csv', 'five.csv'],
-        current_time=datetime(2026, 4, 3, 9, 40, tzinfo=ET),
+        file_paths=[str(chart_daily), str(chart_1h), str(chart_5)],
+        current_time=datetime(2026, 2, 2, 9, 40, tzinfo=ET),
         macro_state='Mixed',
         vix=18.0,
         bias=None,
@@ -508,4 +522,6 @@ def test_build_analysis_snapshot_marks_mature_wide_scalp_plan_as_no_trade(
     )
 
     assert snapshot.status == 'NO TRADE'
-
+    assert snapshot.entry == 0.0
+    assert snapshot.stop == 0.0
+    assert snapshot.target == 0.0

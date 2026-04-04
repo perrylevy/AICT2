@@ -656,8 +656,9 @@ def test_derive_setup_plan_targets_scalp_style_5m_ifvg_levels(tmp_path: Path) ->
 
     assert plan is not None
     assert plan.entry_model == "5M IFVG"
-    assert abs(plan.entry - plan.stop) <= 15.0
-    assert 40.0 <= abs(plan.target - plan.entry) <= 50.0
+    assert plan.entry > plan.stop
+    assert plan.entry - plan.stop <= 15.0
+    assert 40.0 <= plan.target - plan.entry <= 50.0
 
 
 def test_derive_setup_plan_rejects_scalp_when_only_wide_stop_is_available(tmp_path: Path) -> None:
@@ -702,4 +703,3 @@ def test_derive_setup_plan_rejects_scalp_when_only_wide_stop_is_available(tmp_pa
     assert plan.entry == 0.0
     assert plan.stop == 0.0
     assert plan.target == 0.0
-

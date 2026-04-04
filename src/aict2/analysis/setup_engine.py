@@ -462,6 +462,7 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
     }
     ordered_timeframes = sorted(facts, key=lambda tf: _TF_ORDER[tf])
     execution_timeframe = ordered_timeframes[-1]
+    has_higher_timeframe_context = len(ordered_timeframes) > 1
     execution_frame = frames[execution_timeframe]
     execution_fact = facts[execution_timeframe]
     raw_bias = weighted_bias_score(facts)
@@ -511,6 +512,7 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         execution_timeframe=execution_timeframe,
         entry_model=entry_model,
         draw_on_liquidity=draw_on_liquidity,
+        has_higher_timeframe_context=has_higher_timeframe_context,
     )
     confirmation_needed = resolve_confirmation_requirement(
         base_needs_confirmation=confirmation_needed,
@@ -533,14 +535,6 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         and daily_profile == "continuation"
     ):
         stop_run_summary = "No stop run required; continuation structure is already confirmed."
-    if (
-        execution_timeframe == "5M"
-        and entry == 0.0
-        and stop == 0.0
-        and target == 0.0
-    ):
-        confirmation_needed = False
-        retrace_required = False
     return ChartDerivedPlan(
         bias=bias,
         daily_profile=daily_profile,

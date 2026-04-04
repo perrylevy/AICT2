@@ -271,6 +271,9 @@ def test_derive_status_prioritizes_severely_bad_rr_over_wait_conditions() -> Non
         needs_confirmation=True,
         requires_retrace=True,
         session=session,
+        entry=23846.0,
+        stop=23695.0,
+        target=23882.0,
     )
 
     assert risk.rr < 1.0
@@ -461,7 +464,7 @@ def test_build_analysis_snapshot_marks_clear_directional_scalp_as_live_setup(
     assert 40.0 <= snapshot.target - snapshot.entry <= 50.0
 
 
-def test_build_analysis_snapshot_rejects_mature_but_invalid_wide_scalp_plan(
+def test_build_analysis_snapshot_waits_when_scalp_geometry_is_still_invalid(
     tmp_path: Path,
 ) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
@@ -521,7 +524,9 @@ def test_build_analysis_snapshot_rejects_mature_but_invalid_wide_scalp_plan(
         memory_store=memory_store,
     )
 
-    assert snapshot.status == 'NO TRADE'
+    assert snapshot.status == 'WAIT'
+    assert snapshot.needs_confirmation is True
+    assert snapshot.requires_retrace is True
     assert snapshot.entry == 0.0
     assert snapshot.stop == 0.0
     assert snapshot.target == 0.0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import pandas as pd
 
@@ -121,6 +122,18 @@ def round_tick(price: float) -> float:
     return round(price * 4) / 4
 
 
+def _round_retrace_entry(entry: float, *, bias: str, last_close: float, retrace_required: bool) -> float:
+    rounded = round_tick(entry)
+    if not retrace_required:
+        return rounded
+
+    if bias == 'bullish' and rounded >= last_close:
+        return math.floor((last_close - 0.25) * 4) / 4
+    if bias == 'bearish' and rounded <= last_close:
+        return math.ceil((last_close + 0.25) * 4) / 4
+    return rounded
+
+
 def _is_scalp_execution_timeframe(execution_timeframe: str) -> bool:
     return execution_timeframe in SCALP_EXECUTION_TIMEFRAMES
 
@@ -211,6 +224,7 @@ def _resolve_scalp_target(
     stop: float,
     bias: str,
     draw_on_liquidity: str,
+    has_higher_timeframe_context: bool,
 ) -> float | None:
     risk = abs(entry - stop)
     if risk <= 0 or bias not in {'bullish', 'bearish'}:
@@ -229,8 +243,12 @@ def _resolve_scalp_target(
     if (bias == 'bullish' and liquidity_target <= entry) or (
         bias == 'bearish' and liquidity_target >= entry
     ):
+        if not has_higher_timeframe_context:
+            return round_tick(default_target)
         return None
     if distance < max(SCALP_TARGET_MIN, risk * 1.75):
+        if not has_higher_timeframe_context:
+            return round_tick(default_target)
         return None
     if SCALP_TARGET_MIN <= distance <= SCALP_TARGET_MAX:
         return round_tick(liquidity_target)
@@ -332,7 +350,13 @@ def _derive_structure_trade_levels(
     else:
         return 0.0, 0.0, 0.0
 
-    return round_tick(entry), round_tick(stop), round_tick(target)
+    rounded_entry = _round_retrace_entry(
+        entry,
+        bias=bias,
+        last_close=last_close,
+        retrace_required=retrace_required,
+    )
+    return rounded_entry, round_tick(stop), round_tick(target)
 
 
 def derive_scalp_trade_levels(
@@ -343,11 +367,25 @@ def derive_scalp_trade_levels(
     execution_timeframe: str,
     entry_model: str,
     draw_on_liquidity: str,
+    has_higher_timeframe_context: bool,
 ) -> tuple[float, float, float, str, str]:
     if bias not in {'bullish', 'bearish'}:
         return 0.0, 0.0, 0.0, 'Scalp Liquidity', 'Scalp construction needs directional bias.'
 
-    entry = round_tick(float(execution_frame['close'].iloc[-1]))
+    last_close = float(execution_frame['close'].iloc[-1])
+    retrace_required = requires_retrace(bias, fact)
+    raw_entry = last_close
+    if retrace_required:
+        if bias == 'bullish':
+            raw_entry = last_close - 0.25
+        elif bias == 'bearish':
+            raw_entry = last_close + 0.25
+    entry = _round_retrace_entry(
+        raw_entry,
+        bias=bias,
+        last_close=last_close,
+        retrace_required=retrace_required,
+    )
     invalidation = _resolve_scalp_invalidation_price(
         execution_frame,
         fact,
@@ -369,6 +407,7 @@ def derive_scalp_trade_levels(
         stop=stop,
         bias=bias,
         draw_on_liquidity=draw_on_liquidity,
+        has_higher_timeframe_context=has_higher_timeframe_context,
     )
     if target is None:
         return (
@@ -396,6 +435,7 @@ def derive_trade_levels(
     execution_timeframe: str,
     entry_model: str,
     draw_on_liquidity: str,
+    has_higher_timeframe_context: bool,
 ) -> tuple[float, float, float, str, str]:
     if _is_scalp_execution_timeframe(execution_timeframe):
         return derive_scalp_trade_levels(
@@ -405,6 +445,7 @@ def derive_trade_levels(
             execution_timeframe=execution_timeframe,
             entry_model=entry_model,
             draw_on_liquidity=draw_on_liquidity,
+            has_higher_timeframe_context=has_higher_timeframe_context,
         )
 
     entry, stop, target = _derive_structure_trade_levels(execution_frame, bias, fact)

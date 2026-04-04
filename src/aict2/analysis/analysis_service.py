@@ -101,6 +101,9 @@ def _derive_status(
     needs_confirmation: bool,
     requires_retrace: bool,
     session: SessionLens,
+    entry: float,
+    stop: float,
+    target: float,
 ) -> str:
     if request.mode == 'multi' and not request.is_canonical_bundle:
         return 'WATCH'
@@ -112,6 +115,13 @@ def _derive_status(
         and risk.rr < 1.0
     ):
         return 'NO TRADE'
+    if (
+        thesis.state in {'bullish', 'bearish'}
+        and entry == 0.0
+        and stop == 0.0
+        and target == 0.0
+    ):
+        return 'WAIT'
     if needs_confirmation:
         return 'WAIT'
     if requires_retrace:
@@ -243,6 +253,9 @@ def build_analysis_snapshot(
         needs_confirmation=needs_confirmation,
         requires_retrace=requires_retrace,
         session=session,
+        entry=resolved_entry,
+        stop=resolved_stop,
+        target=resolved_target,
     )
 
     if memory_store is not None and request.has_higher_timeframe_context:

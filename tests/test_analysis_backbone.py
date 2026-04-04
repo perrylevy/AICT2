@@ -172,6 +172,9 @@ def test_derive_status_keeps_bad_rr_waits_during_premarket() -> None:
         needs_confirmation=True,
         requires_retrace=True,
         session=session,
+        entry=23846.0,
+        stop=23695.0,
+        target=23882.0,
     )
 
     assert session.session_phase == 'premarket'
@@ -201,6 +204,9 @@ def test_derive_status_prioritizes_severely_bad_rr_only_overnight() -> None:
         needs_confirmation=True,
         requires_retrace=True,
         session=session,
+        entry=23846.0,
+        stop=23695.0,
+        target=23882.0,
     )
 
     assert session.session_phase == 'overnight'

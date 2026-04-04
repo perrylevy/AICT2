@@ -617,3 +617,89 @@ def test_resolve_stop_run_confirmation_rejects_raid_far_from_selected_levels() -
 
     assert confirmed is False
     assert summary.startswith("No confirmed stop run at the selected draw on liquidity yet")
+
+
+def test_derive_setup_plan_builds_bullish_5m_ifvg_as_a_true_scalp_plan(
+    tmp_path: Path,
+) -> None:
+    chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
+    chart_1h = tmp_path / "CME_MINI_MNQ1!, 60.csv"
+    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
+    _write_chart(
+        chart_daily,
+        [
+            ("2026-03-31T00:00:00-04:00", 24220.0, 24240.0, 24140.0, 24160.0),
+            ("2026-04-01T00:00:00-04:00", 24160.0, 24180.0, 24080.0, 24100.0),
+            ("2026-04-02T00:00:00-04:00", 24100.0, 24120.0, 24020.0, 24040.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ("2026-04-02T07:00:00-04:00", 24080.0, 24100.0, 24040.0, 24090.0),
+            ("2026-04-02T08:00:00-04:00", 24090.0, 24140.0, 24070.0, 24120.0),
+            ("2026-04-02T09:00:00-04:00", 24120.0, 24200.0, 24100.0, 24190.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ("2026-04-02T09:10:00-04:00", 24080.0, 24090.0, 24070.0, 24078.0),
+            ("2026-04-02T09:15:00-04:00", 24078.0, 24082.0, 24060.0, 24064.0),
+            ("2026-04-02T09:20:00-04:00", 24064.0, 24070.0, 24050.0, 24054.0),
+            ("2026-04-02T09:25:00-04:00", 24054.0, 24058.0, 24040.0, 24044.0),
+            ("2026-04-02T09:30:00-04:00", 24044.0, 24042.0, 24020.0, 24024.0),
+            ("2026-04-02T09:35:00-04:00", 24024.0, 24080.0, 24022.0, 24078.0),
+            ("2026-04-02T09:40:00-04:00", 24078.0, 24150.0, 24076.0, 24128.0),
+        ],
+    )
+
+    plan = derive_setup_plan([str(chart_daily), str(chart_1h), str(chart_5)])
+
+    assert plan is not None
+    assert plan.entry_model == "5M IFVG"
+    assert plan.stop - plan.entry <= 15.0
+    assert 40.0 <= plan.target - plan.entry <= 50.0
+
+
+def test_derive_setup_plan_rejects_bullish_5m_ifvg_when_only_a_wide_stop_is_available(
+    tmp_path: Path,
+) -> None:
+    chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
+    chart_1h = tmp_path / "CME_MINI_MNQ1!, 60.csv"
+    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
+    _write_chart(
+        chart_daily,
+        [
+            ("2026-03-31T00:00:00-04:00", 24220.0, 24240.0, 24140.0, 24160.0),
+            ("2026-04-01T00:00:00-04:00", 24160.0, 24180.0, 24080.0, 24100.0),
+            ("2026-04-02T00:00:00-04:00", 24100.0, 24120.0, 24020.0, 24040.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ("2026-04-02T07:00:00-04:00", 24080.0, 24100.0, 24040.0, 24090.0),
+            ("2026-04-02T08:00:00-04:00", 24090.0, 24140.0, 24070.0, 24120.0),
+            ("2026-04-02T09:00:00-04:00", 24120.0, 24200.0, 24100.0, 24190.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ("2026-04-02T09:10:00-04:00", 24080.0, 24090.0, 24070.0, 24078.0),
+            ("2026-04-02T09:15:00-04:00", 24078.0, 24082.0, 24060.0, 24064.0),
+            ("2026-04-02T09:20:00-04:00", 24064.0, 24070.0, 24050.0, 24054.0),
+            ("2026-04-02T09:25:00-04:00", 24054.0, 24058.0, 24040.0, 24044.0),
+            ("2026-04-02T09:30:00-04:00", 24044.0, 24042.0, 24020.0, 24024.0),
+            ("2026-04-02T09:35:00-04:00", 24024.0, 24080.0, 24022.0, 24078.0),
+            ("2026-04-02T09:40:00-04:00", 24078.0, 24150.0, 24076.0, 24128.0),
+        ],
+    )
+
+    plan = derive_setup_plan([str(chart_daily), str(chart_1h), str(chart_5)])
+
+    assert plan is not None
+    assert plan.entry == 0.0
+    assert plan.stop == 0.0
+    assert plan.target == 0.0

@@ -129,6 +129,50 @@ def test_backtest_cli_prints_case_and_summary_lines(tmp_path: Path, capsys, monk
     assert "total_cases=1" in output
 
 
+def test_backtest_cli_prints_execution_only_comparison_columns(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    case = tmp_path / "2026-04-02-0955"
+    analysis = case / "analysis"
+    score = case / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 1D.csv",
+        [("2026-04-02T00:00:00-04:00", 20000, 20100, 19950, 20080)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 60.csv",
+        [("2026-04-02T09:00:00-04:00", 20050, 20090, 20040, 20085)],
+    )
+    _write_csv(
+        analysis / "CME_MINI_MNQ1!, 5.csv",
+        [("2026-04-02T09:55:00-04:00", 20012, 20016, 20008, 20015)],
+    )
+    _write_csv(
+        score / "CME_MINI_MNQ1!, 1.csv",
+        [("2026-04-02T09:56:00-04:00", 20015, 20020, 20012, 20018)],
+    )
+
+    def fake_build_analysis_snapshot(**kwargs):
+        return _snapshot(status="LIVE SETUP" if len(kwargs["file_names"]) == 1 else "WAIT")
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", fake_build_analysis_snapshot)
+    monkeypatch.setattr(
+        "aict2.backtest.engine.replay_live_setup",
+        lambda case_arg, snapshot_arg: BacktestTradeReplay(outcome="TP_HIT", score=1.0),
+    )
+
+    exit_code = main(["--compare-execution-only", str(tmp_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "three_chart=WAIT" in output
+    assert "execution_only=LIVE SETUP" in output
+    assert "differs=yes" in output
+
+
 def test_backtest_cli_reports_invalid_cases_without_crashing(
     tmp_path: Path, capsys, monkeypatch
 ) -> None:

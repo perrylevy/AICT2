@@ -25,6 +25,19 @@ class BacktestTradeReplay:
 
 
 @dataclass(frozen=True, slots=True)
+class BacktestComparison:
+    primary_status: str | None
+    execution_only_status: str | None
+    differs: bool
+    primary_entry: float | None
+    execution_only_entry: float | None
+    primary_stop: float | None
+    execution_only_stop: float | None
+    primary_target: float | None
+    execution_only_target: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class BacktestCaseResult:
     case_id: str
     instrument: str | None
@@ -40,6 +53,7 @@ class BacktestCaseResult:
     trade_score: float | None
     validation_error: str | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
+    comparison: BacktestComparison | None = None
 
 
 @dataclass(frozen=True, slots=True)

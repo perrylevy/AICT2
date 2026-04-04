@@ -5,48 +5,124 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from aict2.analysis.analysis_service import build_analysis_snapshot
-from aict2.backtest.models import BacktestCase, BacktestCaseResult, BacktestSummary
+from aict2.backtest.models import (
+    BacktestCase,
+    BacktestCaseResult,
+    BacktestComparison,
+    BacktestSummary,
+)
 from aict2.backtest.scoring import replay_live_setup
 from aict2.context.store import ContextStore
 from aict2.context.structural_memory import StructuralMemoryStore
+from aict2.io.filename_parsing import parse_chart_file_name
+
+
+def _invalid_case_result(case: BacktestCase) -> BacktestCaseResult:
+    return BacktestCaseResult(
+        case_id=case.case_id,
+        instrument=case.instrument,
+        ordered_timeframes=case.ordered_timeframes,
+        execution_timeframe=case.execution_timeframe,
+        analysis_timestamp=case.analysis_timestamp,
+        status=None,
+        thesis_state=None,
+        entry=None,
+        stop=None,
+        target=None,
+        trade_outcome=None,
+        trade_score=None,
+        validation_error=case.validation_error,
+    )
+
+
+def _runtime_failure_result(case: BacktestCase, exc: Exception) -> BacktestCaseResult:
+    return BacktestCaseResult(
+        case_id=case.case_id,
+        instrument=case.instrument,
+        ordered_timeframes=case.ordered_timeframes,
+        execution_timeframe=case.execution_timeframe,
+        analysis_timestamp=case.analysis_timestamp,
+        status=None,
+        thesis_state=None,
+        entry=None,
+        stop=None,
+        target=None,
+        trade_outcome=None,
+        trade_score=None,
+        validation_error=str(exc),
+        notes=("runtime_failure",),
+    )
+
+
+def _analyze_case(
+    case: BacktestCase, memory_store: StructuralMemoryStore | None = None
+):
+    return build_analysis_snapshot(
+        file_names=[path.name for path in case.analysis_paths],
+        file_paths=[str(path) for path in case.analysis_paths],
+        current_time=case.analysis_timestamp,
+        macro_state="Mixed",
+        vix=18.0,
+        bias=None,
+        daily_profile=None,
+        entry=0.0,
+        stop=0.0,
+        target=0.0,
+        memory_store=memory_store,
+    )
+
+
+def _execution_only_case(case: BacktestCase) -> BacktestCase:
+    execution_paths = tuple(
+        path
+        for path in case.analysis_paths
+        if case.execution_timeframe
+        and parse_chart_file_name(path.name)[1] == case.execution_timeframe
+    )
+    if len(execution_paths) != 1:
+        raise ValueError("Missing execution timeframe chart for comparison")
+    return BacktestCase(
+        case_id=case.case_id,
+        case_path=case.case_path,
+        analysis_paths=execution_paths,
+        score_path=case.score_path,
+        instrument=case.instrument,
+        ordered_timeframes=(case.execution_timeframe,),
+        execution_timeframe=case.execution_timeframe,
+        analysis_timestamp=case.analysis_timestamp,
+        validation_error=case.validation_error,
+    )
+
+
+def _build_comparison(case: BacktestCase, snapshot) -> BacktestComparison | None:
+    if len(case.analysis_paths) <= 1 or case.execution_timeframe is None:
+        return None
+    execution_only_snapshot = _analyze_case(_execution_only_case(case))
+    return BacktestComparison(
+        primary_status=snapshot.status,
+        execution_only_status=execution_only_snapshot.status,
+        differs=snapshot.status != execution_only_snapshot.status,
+        primary_entry=snapshot.entry,
+        execution_only_entry=execution_only_snapshot.entry,
+        primary_stop=snapshot.stop,
+        execution_only_stop=execution_only_snapshot.stop,
+        primary_target=snapshot.target,
+        execution_only_target=execution_only_snapshot.target,
+    )
 
 
 def run_backtest_case(
-    case: BacktestCase, memory_store: StructuralMemoryStore | None = None
+    case: BacktestCase,
+    memory_store: StructuralMemoryStore | None = None,
+    compare_execution_only: bool = False,
 ) -> BacktestCaseResult:
     if case.validation_error is not None:
-        return BacktestCaseResult(
-            case_id=case.case_id,
-            instrument=case.instrument,
-            ordered_timeframes=case.ordered_timeframes,
-            execution_timeframe=case.execution_timeframe,
-            analysis_timestamp=case.analysis_timestamp,
-            status=None,
-            thesis_state=None,
-            entry=None,
-            stop=None,
-            target=None,
-            trade_outcome=None,
-            trade_score=None,
-            validation_error=case.validation_error,
-        )
+        return _invalid_case_result(case)
 
     try:
-        snapshot = build_analysis_snapshot(
-            file_names=[path.name for path in case.analysis_paths],
-            file_paths=[str(path) for path in case.analysis_paths],
-            current_time=case.analysis_timestamp,
-            macro_state="Mixed",
-            vix=18.0,
-            bias=None,
-            daily_profile=None,
-            entry=0.0,
-            stop=0.0,
-            target=0.0,
-            memory_store=memory_store,
-        )
-
+        snapshot = _analyze_case(case, memory_store=memory_store)
         replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
+        comparison = _build_comparison(case, snapshot) if compare_execution_only else None
 
         return BacktestCaseResult(
             case_id=case.case_id,
@@ -62,27 +138,15 @@ def run_backtest_case(
             trade_outcome=replay.outcome if replay else None,
             trade_score=replay.score if replay else None,
             validation_error=None,
+            comparison=comparison,
         )
     except Exception as exc:
-        return BacktestCaseResult(
-            case_id=case.case_id,
-            instrument=case.instrument,
-            ordered_timeframes=case.ordered_timeframes,
-            execution_timeframe=case.execution_timeframe,
-            analysis_timestamp=case.analysis_timestamp,
-            status=None,
-            thesis_state=None,
-            entry=None,
-            stop=None,
-            target=None,
-            trade_outcome=None,
-            trade_score=None,
-            validation_error=str(exc),
-            notes=("runtime_failure",),
-        )
+        return _runtime_failure_result(case, exc)
 
 
-def run_backtest_cases(cases: list[BacktestCase]) -> list[BacktestCaseResult]:
+def run_backtest_cases(
+    cases: list[BacktestCase], compare_execution_only: bool = False
+) -> list[BacktestCaseResult]:
     ordered_cases = sorted(
         cases,
         key=lambda case: (case.analysis_timestamp is None, case.analysis_timestamp, case.case_id),
@@ -91,7 +155,14 @@ def run_backtest_cases(cases: list[BacktestCase]) -> list[BacktestCaseResult]:
         context_store = ContextStore(db_path=(Path(temp_dir) / "backtest.db"))
         context_store.initialize()
         memory_store = StructuralMemoryStore(context_store)
-        results = [run_backtest_case(case, memory_store=memory_store) for case in ordered_cases]
+        results = [
+            run_backtest_case(
+                case,
+                memory_store=memory_store,
+                compare_execution_only=compare_execution_only,
+            )
+            for case in ordered_cases
+        ]
         memory_store = None
         context_store = None
         gc.collect()

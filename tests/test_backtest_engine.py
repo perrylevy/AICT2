@@ -55,6 +55,44 @@ def _case(tmp_path: Path) -> BacktestCase:
     )
 
 
+def _multi_case(tmp_path: Path) -> BacktestCase:
+    analysis = tmp_path / "analysis"
+    score = tmp_path / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    daily = analysis / "CME_MINI_MNQ1!, 1D.csv"
+    hourly = analysis / "CME_MINI_MNQ1!, 60.csv"
+    execution = analysis / "CME_MINI_MNQ1!, 5.csv"
+    _write_csv(
+        daily,
+        [("2026-04-02T00:00:00-04:00", 20000, 20100, 19950, 20080)],
+    )
+    _write_csv(
+        hourly,
+        [("2026-04-02T09:00:00-04:00", 20050, 20090, 20040, 20085)],
+    )
+    _write_csv(
+        execution,
+        [("2026-04-02T09:55:00-04:00", 20000, 20010, 19990, 20005)],
+    )
+    score_path = score / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        score_path,
+        [("2026-04-02T09:56:00-04:00", 20005, 20040, 20000, 20035)],
+    )
+    return BacktestCase(
+        case_id="case-compare",
+        case_path=tmp_path,
+        analysis_paths=(daily, hourly, execution),
+        score_path=score_path,
+        instrument="MNQ1!",
+        ordered_timeframes=("Daily", "1H", "5M"),
+        execution_timeframe="5M",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        validation_error=None,
+    )
+
+
 def _snapshot(status: str = "LIVE SETUP", state: str = "bullish") -> AnalysisSnapshot:
     return AnalysisSnapshot(
         instrument="MNQ1!",
@@ -158,6 +196,25 @@ def test_run_backtest_case_skips_replay_for_wait_status(tmp_path: Path, monkeypa
     assert result.trade_outcome is None
 
 
+def test_run_backtest_case_can_compare_three_chart_and_execution_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = _multi_case(tmp_path)
+
+    def fake_build_analysis_snapshot(**kwargs):
+        return _snapshot(status="LIVE SETUP" if len(kwargs["file_names"]) == 1 else "WAIT")
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", fake_build_analysis_snapshot)
+
+    result = run_backtest_case(case, compare_execution_only=True)
+
+    assert result.status == "WAIT"
+    assert result.comparison is not None
+    assert result.comparison.primary_status == "WAIT"
+    assert result.comparison.execution_only_status == "LIVE SETUP"
+    assert result.comparison.differs is True
+
+
 def test_run_backtest_case_returns_failed_result_when_analysis_raises(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -222,7 +279,7 @@ def test_run_backtest_cases_orders_cases_by_analysis_timestamp(tmp_path: Path, m
     )
     seen_case_times: list[datetime] = []
 
-    def fake_run_backtest_case(case, memory_store=None):
+    def fake_run_backtest_case(case, memory_store=None, compare_execution_only=False):
         seen_case_times.append(case.analysis_timestamp)
         return BacktestCaseResult(
             case_id=case.case_id,

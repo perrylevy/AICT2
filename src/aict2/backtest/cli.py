@@ -10,6 +10,11 @@ from aict2.backtest.loader import discover_backtest_cases
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m aict2.backtest")
+    parser.add_argument(
+        "--compare-execution-only",
+        action="store_true",
+        help="Also run each case as execution-timeframe-only analysis for comparison",
+    )
     parser.add_argument("cases_dir", help="Directory containing per-case backtest folders")
     args = parser.parse_args(argv)
     cases_dir = Path(args.cases_dir)
@@ -19,13 +24,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     cases = discover_backtest_cases(cases_dir)
-    results = run_backtest_cases(cases)
+    results = run_backtest_cases(cases, compare_execution_only=args.compare_execution_only)
     summary = summarize_results(results)
 
     for result in results:
         status = result.validation_error or result.status or "UNKNOWN"
         replay = result.trade_outcome or "-"
-        print(f"{result.case_id}\t{status}\t{replay}")
+        parts = [result.case_id, status, replay]
+        if result.comparison is not None:
+            parts.extend(
+                [
+                    f"three_chart={result.comparison.primary_status or '-'}",
+                    f"execution_only={result.comparison.execution_only_status or '-'}",
+                    f"differs={'yes' if result.comparison.differs else 'no'}",
+                ]
+            )
+        print("\t".join(parts))
 
     print(
         "SUMMARY "

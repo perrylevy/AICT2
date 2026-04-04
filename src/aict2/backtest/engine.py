@@ -94,10 +94,14 @@ def _execution_only_case(case: BacktestCase) -> BacktestCase:
     )
 
 
-def _build_comparison(case: BacktestCase, snapshot) -> BacktestComparison | None:
+def _build_comparison(
+    case: BacktestCase,
+    snapshot,
+    memory_store: StructuralMemoryStore | None = None,
+) -> BacktestComparison | None:
     if len(case.analysis_paths) <= 1 or case.execution_timeframe is None:
         return None
-    execution_only_snapshot = _analyze_case(_execution_only_case(case))
+    execution_only_snapshot = _analyze_case(_execution_only_case(case), memory_store=memory_store)
     return BacktestComparison(
         primary_status=snapshot.status,
         execution_only_status=execution_only_snapshot.status,
@@ -120,11 +124,24 @@ def run_backtest_case(
         return _invalid_case_result(case)
 
     try:
-        snapshot = _analyze_case(case, memory_store=memory_store)
-        replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
-        comparison = _build_comparison(case, snapshot) if compare_execution_only else None
+        comparison_memory_store = memory_store
+        temp_dir: TemporaryDirectory[str] | None = None
+        temp_context_store: ContextStore | None = None
+        if compare_execution_only and comparison_memory_store is None:
+            temp_dir = TemporaryDirectory()
+            temp_context_store = ContextStore(db_path=(Path(temp_dir.name) / "backtest.db"))
+            temp_context_store.initialize()
+            comparison_memory_store = StructuralMemoryStore(temp_context_store)
 
-        return BacktestCaseResult(
+        snapshot = _analyze_case(case, memory_store=comparison_memory_store)
+        replay = replay_live_setup(case, snapshot) if snapshot.status == "LIVE SETUP" else None
+        comparison = (
+            _build_comparison(case, snapshot, memory_store=comparison_memory_store)
+            if compare_execution_only
+            else None
+        )
+
+        result = BacktestCaseResult(
             case_id=case.case_id,
             instrument=snapshot.instrument,
             ordered_timeframes=case.ordered_timeframes,
@@ -140,6 +157,12 @@ def run_backtest_case(
             validation_error=None,
             comparison=comparison,
         )
+        comparison_memory_store = None
+        temp_context_store = None
+        gc.collect()
+        if temp_dir is not None:
+            temp_dir.cleanup()
+        return result
     except Exception as exc:
         return _runtime_failure_result(case, exc)
 

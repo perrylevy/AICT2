@@ -215,6 +215,26 @@ def test_run_backtest_case_can_compare_three_chart_and_execution_only(
     assert result.comparison.differs is True
 
 
+def test_run_backtest_case_reuses_memory_store_for_execution_only_comparison(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = _multi_case(tmp_path)
+    seen_memory_store: list[object] = []
+
+    def fake_build_analysis_snapshot(**kwargs):
+        seen_memory_store.append(kwargs["memory_store"])
+        return _snapshot(status="WAIT")
+
+    monkeypatch.setattr("aict2.backtest.engine.build_analysis_snapshot", fake_build_analysis_snapshot)
+
+    result = run_backtest_case(case, compare_execution_only=True)
+
+    assert result.comparison is not None
+    assert len(seen_memory_store) == 2
+    assert seen_memory_store[0] is not None
+    assert seen_memory_store[0] is seen_memory_store[1]
+
+
 def test_run_backtest_case_returns_failed_result_when_analysis_raises(
     tmp_path: Path, monkeypatch
 ) -> None:

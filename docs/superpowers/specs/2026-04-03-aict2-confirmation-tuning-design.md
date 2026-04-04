@@ -150,3 +150,15 @@ Also run the same batch in diagnostic `5M-only` mode to identify where higher-ti
 ## Rollback
 
 This change should be isolated to the confirmation pipeline and backtest comparison plumbing so it can be reverted cleanly if the new behavior proves too loose.
+
+## Validation Notes
+
+- Before tuning on the Feb 2-13 2026 `9:40 AM ET` batch:
+  `SUMMARY total_cases=10 valid_cases=10 invalid_cases=0 watch=0 wait=10 no_trade=0 live_setup=0 tp_hit=0 sl_hit=0 no_entry=0 unresolved=0 no_setup=0`
+- After tuning in normal mode:
+  `SUMMARY total_cases=10 valid_cases=10 invalid_cases=0 watch=0 wait=7 no_trade=3 live_setup=0 tp_hit=0 sl_hit=0 no_entry=0 unresolved=0 no_setup=0`
+- Execution-only comparison differences:
+  - `2026-02-04	WAIT	-	three_chart=WAIT	execution_only=NO TRADE	differs=yes`
+  - `2026-02-10	NO TRADE	-	three_chart=NO TRADE	execution_only=WAIT	differs=yes`
+- Observation:
+  The tuned confirmation policy reduced pure `WAIT` outcomes and produced meaningful `3-chart` versus `5M-only` differences, but this sample still produced `0` `LIVE SETUP` cases. The next investigation should focus on whether risk, target sizing, or the execution trigger thresholds remain too restrictive for the user's `40-50` point objective.

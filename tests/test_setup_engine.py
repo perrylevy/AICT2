@@ -246,7 +246,11 @@ def test_resolve_confirmation_requirement_allows_clean_bullish_continuation_with
             execution_displacement=1.5,
             execution_reclaimed_high=True,
             execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
             entry_model="15M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
         )
         is False
     )
@@ -263,7 +267,11 @@ def test_resolve_confirmation_requirement_still_requires_confirmation_for_weak_c
             execution_displacement=1.05,
             execution_reclaimed_high=False,
             execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
             entry_model="5M/15M Confirmation",
+            liquidity_summary="No clear liquidity sweep; waiting for cleaner pool interaction",
+            requires_retrace=False,
         )
         is True
     )
@@ -280,7 +288,11 @@ def test_resolve_confirmation_requirement_allows_mixed_context_ifvg_override() -
             execution_displacement=1.6,
             execution_reclaimed_high=True,
             execution_broke_low=False,
+            execution_bias_override_active=True,
+            execution_timeframe="5M",
             entry_model="5M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
         )
         is False
     )
@@ -297,7 +309,11 @@ def test_resolve_confirmation_requirement_keeps_mixed_context_wait_without_named
             execution_displacement=1.8,
             execution_reclaimed_high=True,
             execution_broke_low=False,
+            execution_bias_override_active=True,
+            execution_timeframe="5M",
             entry_model="5M/15M Confirmation",
+            liquidity_summary="No clear liquidity sweep; waiting for cleaner pool interaction",
+            requires_retrace=False,
         )
         is True
     )
@@ -314,9 +330,76 @@ def test_resolve_confirmation_requirement_allows_aligned_reversal_ifvg_without_s
             execution_displacement=1.5,
             execution_reclaimed_high=False,
             execution_broke_low=True,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
             entry_model="5M IFVG",
+            liquidity_summary="Sell-side pressure through recent swing low 23910.00",
+            requires_retrace=False,
         )
         is False
+    )
+
+
+def test_resolve_confirmation_requirement_allows_clear_5m_reclaim_without_ifvg() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.2,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=True,
+            execution_timeframe="5M",
+            entry_model="5M/15M Confirmation",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+        )
+        is False
+    )
+
+
+def test_resolve_confirmation_requirement_keeps_weak_reclaim_waiting_without_ifvg() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.05,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=True,
+            execution_timeframe="5M",
+            entry_model="5M/15M Confirmation",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+        )
+        is True
+    )
+
+
+def test_resolve_confirmation_requirement_keeps_override_scoped_to_5m() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.6,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="15M",
+            entry_model="15M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+        )
+        is True
     )
 
 
@@ -402,6 +485,50 @@ def test_derive_setup_plan_keeps_confirmation_required_without_real_stop_run(
     assert plan.bias == "bullish"
     assert plan.stop_run_summary.startswith("No confirmed stop run")
     assert plan.needs_confirmation is True
+
+
+def test_derive_setup_plan_promotes_execution_bias_when_htf_is_mixed_but_5m_ifvg_is_clean(
+    tmp_path: Path,
+) -> None:
+    chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
+    chart_1h = tmp_path / "CME_MINI_MNQ1!, 60.csv"
+    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
+    _write_chart(
+        chart_daily,
+        [
+            ("2026-03-31T00:00:00-04:00", 24220.0, 24240.0, 24140.0, 24160.0),
+            ("2026-04-01T00:00:00-04:00", 24160.0, 24180.0, 24080.0, 24100.0),
+            ("2026-04-02T00:00:00-04:00", 24100.0, 24120.0, 24020.0, 24040.0),
+        ],
+    )
+    _write_chart(
+        chart_1h,
+        [
+            ("2026-04-02T07:00:00-04:00", 24080.0, 24100.0, 24040.0, 24090.0),
+            ("2026-04-02T08:00:00-04:00", 24090.0, 24140.0, 24070.0, 24120.0),
+            ("2026-04-02T09:00:00-04:00", 24120.0, 24200.0, 24100.0, 24190.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ("2026-04-02T09:10:00-04:00", 24080.0, 24090.0, 24070.0, 24078.0),
+            ("2026-04-02T09:15:00-04:00", 24078.0, 24082.0, 24060.0, 24064.0),
+            ("2026-04-02T09:20:00-04:00", 24064.0, 24070.0, 24050.0, 24054.0),
+            ("2026-04-02T09:25:00-04:00", 24054.0, 24058.0, 24040.0, 24044.0),
+            ("2026-04-02T09:30:00-04:00", 24044.0, 24042.0, 24020.0, 24024.0),
+            ("2026-04-02T09:35:00-04:00", 24024.0, 24080.0, 24022.0, 24078.0),
+            ("2026-04-02T09:40:00-04:00", 24078.0, 24150.0, 24076.0, 24128.0),
+        ],
+    )
+
+    plan = derive_setup_plan([str(chart_daily), str(chart_1h), str(chart_5)])
+
+    assert plan is not None
+    assert plan.bias == "bullish"
+    assert plan.entry_model == "5M IFVG"
+    assert plan.requires_retrace is False
+    assert plan.needs_confirmation is False
 
 
 def test_derive_setup_plan_uses_15m_ifvg_as_entry_trigger_when_available(

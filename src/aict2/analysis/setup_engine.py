@@ -198,6 +198,83 @@ def _has_confirmed_stop_run(liquidity_summary: str) -> bool:
     )
 
 
+def _has_named_execution_trigger(
+    *,
+    execution_timeframe: str,
+    entry_model: str,
+    liquidity_summary: str,
+    execution_displacement: float,
+) -> bool:
+    if execution_timeframe != "5M":
+        return False
+    normalized_entry_model = entry_model.lower()
+    if "ifvg" in normalized_entry_model or "breaker" in normalized_entry_model:
+        return True
+    normalized_liquidity = liquidity_summary.lower()
+    return (
+        _has_confirmed_stop_run(liquidity_summary)
+        or (
+            execution_displacement >= 1.2
+            and (
+                normalized_liquidity.startswith("buy-side reclaim")
+                or normalized_liquidity.startswith("sell-side pressure")
+            )
+        )
+    )
+
+
+def _has_execution_confirmation_signal(
+    *,
+    bias: str,
+    entry_model: str,
+    execution_reclaimed_high: bool,
+    execution_broke_low: bool,
+    liquidity_summary: str,
+) -> bool:
+    normalized_entry_model = entry_model.lower()
+    if "ifvg" in normalized_entry_model or "breaker" in normalized_entry_model:
+        return True
+    if _has_confirmed_stop_run(liquidity_summary):
+        return True
+    if bias == "bullish":
+        return execution_reclaimed_high
+    if bias == "bearish":
+        return execution_broke_low
+    return False
+
+
+def _resolve_execution_override_bias(
+    *,
+    raw_bias: str,
+    execution_timeframe: str,
+    execution_bias: str,
+    execution_entry_model: str,
+    execution_fact: ChartFrameFacts,
+) -> str:
+    if raw_bias != "mixed":
+        return raw_bias
+    if execution_bias not in {"bullish", "bearish"}:
+        return raw_bias
+    if requires_retrace(execution_bias, execution_fact):
+        return raw_bias
+    if not _has_named_execution_trigger(
+        execution_timeframe=execution_timeframe,
+        entry_model=execution_entry_model,
+        liquidity_summary=execution_fact.liquidity_summary,
+        execution_displacement=execution_fact.displacement,
+    ):
+        return raw_bias
+    if not _has_execution_confirmation_signal(
+        bias=execution_bias,
+        entry_model=execution_entry_model,
+        execution_reclaimed_high=execution_fact.reclaimed_high,
+        execution_broke_low=execution_fact.broke_low,
+        liquidity_summary=execution_fact.liquidity_summary,
+    ):
+        return raw_bias
+    return execution_bias
+
+
 def resolve_stop_run_confirmation(
     *,
     liquidity_summary: str,
@@ -232,18 +309,63 @@ def resolve_confirmation_requirement(
     execution_displacement: float,
     execution_reclaimed_high: bool,
     execution_broke_low: bool,
+    execution_bias_override_active: bool,
+    execution_timeframe: str,
     entry_model: str,
+    liquidity_summary: str,
+    requires_retrace: bool,
 ) -> bool:
-    if base_needs_confirmation:
-        return True
     if stop_run_confirmed:
         return False
 
+    named_trigger = _has_named_execution_trigger(
+        execution_timeframe=execution_timeframe,
+        entry_model=entry_model,
+        liquidity_summary=liquidity_summary,
+        execution_displacement=execution_displacement,
+    )
+    directional_execution = execution_bias in {"bullish", "bearish"} and execution_bias == bias
+    execution_signal = _has_execution_confirmation_signal(
+        bias=bias,
+        entry_model=entry_model,
+        execution_reclaimed_high=execution_reclaimed_high,
+        execution_broke_low=execution_broke_low,
+        liquidity_summary=liquidity_summary,
+    )
+
+    reversal_trigger = (
+        daily_profile == "reversal"
+        and directional_execution
+        and named_trigger
+        and execution_signal
+        and not requires_retrace
+    )
+    if reversal_trigger:
+        return False
+
+    mixed_context_override = (
+        execution_bias_override_active
+        and base_needs_confirmation
+        and directional_execution
+        and named_trigger
+        and execution_signal
+        and not requires_retrace
+    )
+    if mixed_context_override:
+        return False
+
     continuation_trigger = (
+        execution_timeframe == "5M"
+        and
         daily_profile == "continuation"
-        and execution_bias == bias
+        and directional_execution
         and execution_displacement >= 1.2
-        and ("IFVG" in entry_model or "Breaker" in entry_model or "Pullback" in entry_model)
+        and (
+            "IFVG" in entry_model
+            or "Breaker" in entry_model
+            or "Pullback" in entry_model
+            or _has_confirmed_stop_run(liquidity_summary)
+        )
     )
     if bias == "bullish" and continuation_trigger and execution_reclaimed_high:
         return False
@@ -339,10 +461,23 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         timeframe: frame_bias(frame, timeframe) for timeframe, frame in frames.items()
     }
     ordered_timeframes = sorted(facts, key=lambda tf: _TF_ORDER[tf])
-    bias = weighted_bias_score(facts)
     execution_timeframe = ordered_timeframes[-1]
     execution_frame = frames[execution_timeframe]
     execution_fact = facts[execution_timeframe]
+    raw_bias = weighted_bias_score(facts)
+    execution_entry_model = derive_execution_entry_trigger(
+        frames,
+        bias=execution_fact.bias,
+        execution_timeframe=execution_timeframe,
+    )
+    bias = _resolve_execution_override_bias(
+        raw_bias=raw_bias,
+        execution_timeframe=execution_timeframe,
+        execution_bias=execution_fact.bias,
+        execution_entry_model=execution_entry_model or "",
+        execution_fact=execution_fact,
+    )
+    execution_bias_override_active = raw_bias != bias
     draw_on_liquidity = _derive_draw_on_liquidity(frames=frames, bias=bias)
     htf_reference = _derive_htf_reference(frames=frames, facts=facts, bias=bias)
     confirmation_needed = needs_confirmation(facts, bias, execution_timeframe)
@@ -379,7 +514,11 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         execution_displacement=execution_fact.displacement,
         execution_reclaimed_high=execution_fact.reclaimed_high,
         execution_broke_low=execution_fact.broke_low,
+        execution_bias_override_active=execution_bias_override_active,
+        execution_timeframe=execution_timeframe,
         entry_model=entry_model,
+        liquidity_summary=execution_fact.liquidity_summary,
+        requires_retrace=retrace_required,
     )
     if (
         not stop_run_confirmed

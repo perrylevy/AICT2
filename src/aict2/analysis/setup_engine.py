@@ -483,7 +483,6 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
     confirmation_needed = needs_confirmation(facts, bias, execution_timeframe)
     retrace_required = requires_retrace(bias, execution_fact)
     daily_profile = derive_daily_profile(execution_frame, bias, execution_fact)
-    entry, stop, target = derive_trade_levels(execution_frame, bias, execution_fact)
     reference_context, internal_reference_context = derive_reference_context(frames)
     gap_summary = derive_gap_summary(frames)
     gap_confluence = derive_gap_confluence(
@@ -504,6 +503,14 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         bias=bias,
         execution_timeframe=execution_timeframe,
         requires_retrace=retrace_required,
+    )
+    entry, stop, target, tp_model, target_reason = derive_trade_levels(
+        execution_frame,
+        bias,
+        execution_fact,
+        execution_timeframe=execution_timeframe,
+        entry_model=entry_model,
+        draw_on_liquidity=draw_on_liquidity,
     )
     confirmation_needed = resolve_confirmation_requirement(
         base_needs_confirmation=confirmation_needed,
@@ -526,12 +533,14 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         and daily_profile == "continuation"
     ):
         stop_run_summary = "No stop run required; continuation structure is already confirmed."
-    target, tp_model, target_reason = resolve_target_and_tp_model(
-        entry=entry,
-        stop=stop,
-        bias=bias,
-        draw_on_liquidity=draw_on_liquidity,
-    )
+    if (
+        execution_timeframe == "5M"
+        and entry == 0.0
+        and stop == 0.0
+        and target == 0.0
+    ):
+        confirmation_needed = False
+        retrace_required = False
     return ChartDerivedPlan(
         bias=bias,
         daily_profile=daily_profile,

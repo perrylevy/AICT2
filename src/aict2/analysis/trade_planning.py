@@ -6,6 +6,13 @@ import pandas as pd
 
 from aict2.analysis.market_frame import ChartFrameFacts, format_price
 
+SCALP_EXECUTION_TIMEFRAMES = {'5M', '1M'}
+SCALP_STOP_FLOOR = 12.0
+SCALP_STOP_CEILING = 60.0
+SCALP_TARGET_MIN = 40.0
+SCALP_TARGET_MAX = 50.0
+SCALP_TARGET_DEFAULT = 45.0
+
 
 @dataclass(frozen=True, slots=True)
 class ChartDerivedPlan:
@@ -114,7 +121,112 @@ def round_tick(price: float) -> float:
     return round(price * 4) / 4
 
 
-def derive_trade_levels(
+def _is_scalp_execution_timeframe(execution_timeframe: str) -> bool:
+    return execution_timeframe in SCALP_EXECUTION_TIMEFRAMES
+
+
+def _extract_price(label: str) -> float | None:
+    import re
+
+    matches = re.findall(r'(-?\d+(?:\.\d+)?)', label)
+    if not matches:
+        return None
+    return float(matches[-1])
+
+
+def _resolve_scalp_invalidation_price(
+    execution_frame: pd.DataFrame,
+    fact: ChartFrameFacts,
+    *,
+    bias: str,
+    entry_model: str,
+) -> float:
+    recent = execution_frame.tail(max(3, min(len(execution_frame), 6))).reset_index(drop=True)
+    if recent.empty:
+        return fact.anchor_close
+
+    latest = recent.iloc[-1]
+    prior = recent.iloc[-2] if len(recent) >= 2 else latest
+    normalized_entry_model = entry_model.lower()
+
+    if 'ifvg' in normalized_entry_model:
+        if bias == 'bullish':
+            return max(float(prior['high']), min(float(latest['open']), float(latest['close'])))
+        if bias == 'bearish':
+            return min(float(prior['low']), max(float(latest['open']), float(latest['close'])))
+
+    if 'breaker' in normalized_entry_model:
+        if bias == 'bullish':
+            return max(float(prior['open']), float(prior['close']))
+        if bias == 'bearish':
+            return min(float(prior['open']), float(prior['close']))
+
+    if bias == 'bullish':
+        return (
+            fact.latest_swing_low
+            if fact.latest_swing_low is not None
+            else float(recent['low'].min())
+        )
+    if bias == 'bearish':
+        return (
+            fact.latest_swing_high
+            if fact.latest_swing_high is not None
+            else float(recent['high'].max())
+        )
+    return fact.anchor_close
+
+
+def _place_scalp_stop(
+    *,
+    entry: float,
+    invalidation: float,
+    bias: str,
+    floor_points: float = SCALP_STOP_FLOOR,
+) -> float:
+    if bias == 'bullish':
+        distance = max(entry - invalidation, floor_points)
+        return round_tick(entry - distance)
+    if bias == 'bearish':
+        distance = max(invalidation - entry, floor_points)
+        return round_tick(entry + distance)
+    return entry
+
+
+def _resolve_scalp_target(
+    *,
+    entry: float,
+    stop: float,
+    bias: str,
+    draw_on_liquidity: str,
+) -> float | None:
+    risk = abs(entry - stop)
+    if risk <= 0 or bias not in {'bullish', 'bearish'}:
+        return None
+
+    directional_sign = 1.0 if bias == 'bullish' else -1.0
+    liquidity_target = _extract_price(draw_on_liquidity)
+    min_target = entry + (directional_sign * SCALP_TARGET_MIN)
+    max_target = entry + (directional_sign * SCALP_TARGET_MAX)
+    default_target = entry + (directional_sign * SCALP_TARGET_DEFAULT)
+
+    if liquidity_target is None:
+        return round_tick(default_target)
+
+    distance = abs(liquidity_target - entry)
+    if (bias == 'bullish' and liquidity_target <= entry) or (
+        bias == 'bearish' and liquidity_target >= entry
+    ):
+        return None
+    if distance < max(SCALP_TARGET_MIN, risk * 1.75):
+        return None
+    if SCALP_TARGET_MIN <= distance <= SCALP_TARGET_MAX:
+        return round_tick(liquidity_target)
+    if distance > SCALP_TARGET_MAX:
+        return round_tick(default_target)
+    return None
+
+
+def _derive_structure_trade_levels(
     execution_frame: pd.DataFrame,
     bias: str,
     fact: ChartFrameFacts,
@@ -169,6 +281,105 @@ def derive_trade_levels(
         return 0.0, 0.0, 0.0
 
     return round_tick(entry), round_tick(stop), round_tick(target)
+
+
+def derive_scalp_trade_levels(
+    execution_frame: pd.DataFrame,
+    bias: str,
+    fact: ChartFrameFacts,
+    *,
+    execution_timeframe: str,
+    entry_model: str,
+    draw_on_liquidity: str,
+) -> tuple[float, float, float, str, str]:
+    if bias not in {'bullish', 'bearish'}:
+        return 0.0, 0.0, 0.0, 'Scalp Liquidity', 'Scalp construction needs directional bias.'
+
+    entry = round_tick(float(execution_frame['close'].iloc[-1]))
+    invalidation = _resolve_scalp_invalidation_price(
+        execution_frame,
+        fact,
+        bias=bias,
+        entry_model=entry_model,
+    )
+    stop = _place_scalp_stop(entry=entry, invalidation=invalidation, bias=bias)
+    if abs(entry - stop) > SCALP_STOP_CEILING:
+        return (
+            0.0,
+            0.0,
+            0.0,
+            'Scalp Liquidity',
+            'Scalp invalidation exceeds the allowed stop envelope.',
+        )
+
+    target = _resolve_scalp_target(
+        entry=entry,
+        stop=stop,
+        bias=bias,
+        draw_on_liquidity=draw_on_liquidity,
+    )
+    if target is None:
+        return (
+            0.0,
+            0.0,
+            0.0,
+            'Scalp Liquidity',
+            'Nearest execution liquidity cannot support a 40-50 point scalp.',
+        )
+
+    return (
+        entry,
+        stop,
+        target,
+        'Scalp Liquidity',
+        'Nearest execution liquidity fits the 40-50 point scalp band.',
+    )
+
+
+def derive_trade_levels(
+    execution_frame: pd.DataFrame,
+    bias: str,
+    fact: ChartFrameFacts,
+    *,
+    execution_timeframe: str,
+    entry_model: str,
+    draw_on_liquidity: str,
+) -> tuple[float, float, float, str, str]:
+    if _is_scalp_execution_timeframe(execution_timeframe):
+        return derive_scalp_trade_levels(
+            execution_frame,
+            bias,
+            fact,
+            execution_timeframe=execution_timeframe,
+            entry_model=entry_model,
+            draw_on_liquidity=draw_on_liquidity,
+        )
+
+    entry, stop, target = _derive_structure_trade_levels(execution_frame, bias, fact)
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return (
+            entry,
+            stop,
+            target,
+            '2R',
+            'Defaulting to a full 2R objective unless external liquidity is closer.',
+        )
+    if abs(target - entry) >= risk * 1.95 and abs(target - entry) <= risk * 2.05:
+        return (
+            entry,
+            stop,
+            target,
+            '2R',
+            'A full 2R objective comes before the next meaningful external liquidity target.',
+        )
+    return (
+        entry,
+        stop,
+        target,
+        'Draw on Liquidity',
+        'External liquidity caps the trade before a full 2R expansion.',
+    )
 
 
 def derive_reference_context(frames: dict[str, pd.DataFrame]) -> tuple[str, str]:

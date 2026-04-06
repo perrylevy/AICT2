@@ -116,13 +116,8 @@ def _derive_status(
     ):
         return 'NO TRADE'
     if (
-        thesis.state in {'bullish', 'bearish'}
-        and entry == 0.0
-        and stop == 0.0
-        and target == 0.0
+        needs_confirmation
     ):
-        return 'WAIT'
-    if needs_confirmation:
         return 'WAIT'
     if requires_retrace:
         return 'WAIT'
@@ -132,6 +127,13 @@ def _derive_status(
         return 'NO TRADE'
     if session.session_phase in {'lunch', 'afternoon'} and not session.active_windows:
         return 'WAIT'
+    if (
+        thesis.state in {'bullish', 'bearish'}
+        and entry == 0.0
+        and stop == 0.0
+        and target == 0.0
+    ):
+        return 'NO TRADE'
     if not risk.clears_min_rr or risk.max_contracts <= 0:
         return 'NO TRADE'
     return 'LIVE SETUP'

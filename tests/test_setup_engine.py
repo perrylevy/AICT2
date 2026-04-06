@@ -3,11 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from aict2.analysis.setup_engine import (
+    _resolve_execution_override_bias,
+    _should_relax_retrace_requirement,
     derive_setup_plan,
     resolve_confirmation_requirement,
     resolve_stop_run_confirmation,
     resolve_target_and_tp_model,
 )
+from aict2.analysis.market_frame import ChartFrameFacts
 
 
 def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]]) -> None:
@@ -361,6 +364,29 @@ def test_resolve_confirmation_requirement_allows_clear_5m_reclaim_without_ifvg()
     )
 
 
+def test_resolve_confirmation_requirement_allows_aligned_5m_displacement_plus_hold_without_stop_run() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.45,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M/15M Confirmation",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+            higher_timeframe_bias="bullish",
+            target_distance=45.0,
+        )
+        is False
+    )
+
+
 def test_resolve_confirmation_requirement_keeps_weak_reclaim_waiting_without_ifvg() -> None:
     assert (
         resolve_confirmation_requirement(
@@ -382,6 +408,75 @@ def test_resolve_confirmation_requirement_keeps_weak_reclaim_waiting_without_ifv
     )
 
 
+def test_resolve_confirmation_requirement_blocks_counter_draw_if_reversal_lacks_sweep() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=False,
+            stop_run_confirmed=False,
+            daily_profile="reversal",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_displacement=1.65,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Sell-side pressure through recent swing low 23910.00",
+            requires_retrace=False,
+            higher_timeframe_bias="bullish",
+            target_distance=80.0,
+        )
+        is True
+    )
+
+
+def test_resolve_confirmation_requirement_blocks_counter_draw_without_60_point_runway() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=False,
+            stop_run_confirmed=False,
+            daily_profile="reversal",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_displacement=1.8,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side liquidity sweep above 24090.00 with bearish close-back-in",
+            requires_retrace=False,
+            higher_timeframe_bias="bullish",
+            target_distance=45.0,
+        )
+        is True
+    )
+
+
+def test_resolve_confirmation_requirement_allows_counter_draw_with_full_exception() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=False,
+            stop_run_confirmed=False,
+            daily_profile="reversal",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_displacement=1.8,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side liquidity sweep above 24090.00 with bearish close-back-in",
+            requires_retrace=False,
+            higher_timeframe_bias="bullish",
+            target_distance=75.0,
+        )
+        is False
+    )
+
+
 def test_resolve_confirmation_requirement_keeps_override_scoped_to_5m() -> None:
     assert (
         resolve_confirmation_requirement(
@@ -400,6 +495,111 @@ def test_resolve_confirmation_requirement_keeps_override_scoped_to_5m() -> None:
             requires_retrace=False,
         )
         is True
+    )
+
+
+def test_resolve_execution_override_bias_allows_strong_mixed_reclaim_despite_extended_range() -> None:
+    execution_fact = ChartFrameFacts(
+        timeframe="5M",
+        last_close=25140.0,
+        last_open=25080.0,
+        last_high=25145.0,
+        last_low=25020.0,
+        anchor_close=25060.0,
+        range_high=25145.0,
+        range_low=25020.0,
+        range_position=0.96,
+        bias="bullish",
+        displacement=1.75,
+        latest_swing_high=25110.0,
+        latest_swing_low=25040.0,
+        reclaimed_high=True,
+        broke_low=False,
+        buy_side_sweep=False,
+        sell_side_sweep=True,
+        liquidity_summary="Sell-side liquidity sweep below 25040.00 with bullish reclaim",
+    )
+
+    bias = _resolve_execution_override_bias(
+        raw_bias="mixed",
+        execution_timeframe="5M",
+        execution_bias="bullish",
+        execution_entry_model="5M Confirmation",
+        execution_fact=execution_fact,
+    )
+
+    assert bias == "bullish"
+
+
+def test_should_relax_retrace_requirement_for_aligned_reversal_ifvg() -> None:
+    assert (
+        _should_relax_retrace_requirement(
+            raw_bias="bullish",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 25546.75",
+            execution_displacement=0.99,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            daily_profile="reversal",
+        )
+        is True
+    )
+
+
+def test_should_not_relax_retrace_requirement_for_weak_mixed_extension() -> None:
+    assert (
+        _should_relax_retrace_requirement(
+            raw_bias="mixed",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_timeframe="5M",
+            entry_model="5M Confirmation",
+            liquidity_summary="Sell-side liquidity sweep below 24780.00 with bullish reclaim",
+            execution_displacement=0.69,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            daily_profile="transition",
+        )
+        is False
+    )
+
+
+def test_should_not_relax_retrace_requirement_for_mixed_ifvg_extension() -> None:
+    assert (
+        _should_relax_retrace_requirement(
+            raw_bias="mixed",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Sell-side pressure through recent swing low 24440.50",
+            execution_displacement=1.95,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            daily_profile="continuation",
+        )
+        is False
+    )
+
+
+def test_should_not_relax_retrace_requirement_for_confirmed_stop_run_reversal() -> None:
+    assert (
+        _should_relax_retrace_requirement(
+            raw_bias="bearish",
+            bias="bearish",
+            execution_bias="bearish",
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side liquidity sweep above 23621.25 with bearish close-back-in",
+            execution_displacement=3.14,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            daily_profile="reversal",
+        )
+        is False
     )
 
 
@@ -487,7 +687,7 @@ def test_derive_setup_plan_keeps_confirmation_required_without_real_stop_run(
     assert plan.needs_confirmation is True
 
 
-def test_derive_setup_plan_promotes_execution_bias_when_htf_is_mixed_but_5m_ifvg_is_clean(
+def test_derive_setup_plan_keeps_counter_draw_5m_ifvg_waiting_without_full_exception(
     tmp_path: Path,
 ) -> None:
     chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
@@ -528,7 +728,7 @@ def test_derive_setup_plan_promotes_execution_bias_when_htf_is_mixed_but_5m_ifvg
     assert plan.bias == "bullish"
     assert plan.entry_model == "5M IFVG"
     assert plan.requires_retrace is False
-    assert plan.needs_confirmation is False
+    assert plan.needs_confirmation is True
 
 
 def test_derive_setup_plan_uses_15m_ifvg_as_entry_trigger_when_available(
@@ -700,6 +900,8 @@ def test_derive_setup_plan_rejects_scalp_when_only_wide_stop_is_available(tmp_pa
     plan = derive_setup_plan([str(chart_daily), str(chart_1h), str(chart_5)])
 
     assert plan is not None
-    assert plan.entry == 0.0
-    assert plan.stop == 0.0
-    assert plan.target == 0.0
+    assert plan.entry > 0.0
+    assert plan.stop > 0.0
+    assert plan.target > 0.0
+    assert plan.needs_confirmation is True
+    assert plan.requires_retrace is True

@@ -101,6 +101,42 @@ def test_build_analysis_snapshot_for_single_chart_reuses_memory_context(tmp_path
     assert snapshot.status == 'LIVE SETUP'
 
 
+def test_derive_status_marks_mature_zero_geometry_as_no_trade() -> None:
+    request = build_chart_request(
+        [
+            'CME_MINI_MNQ1!, 1D.csv',
+            'CME_MINI_MNQ1!, 60.csv',
+            'CME_MINI_MNQ1!, 5.csv',
+        ]
+    )
+    thesis = derive_trade_thesis(
+        bias='bearish',
+        daily_profile='reversal',
+        has_higher_timeframe_context=True,
+    )
+    session = build_session_lens(
+        current_time=datetime(2026, 2, 13, 9, 40, tzinfo=ET),
+        macro_state='Mixed',
+        vix=18.0,
+    )
+    risk = evaluate_risk_gate(entry=0.0, stop=0.0, target=0.0)
+
+    status = _derive_status(
+        request=request,
+        thesis=thesis,
+        risk=risk,
+        used_structural_memory=False,
+        needs_confirmation=False,
+        requires_retrace=False,
+        session=session,
+        entry=0.0,
+        stop=0.0,
+        target=0.0,
+    )
+
+    assert status == 'NO TRADE'
+
+
 def test_build_analysis_snapshot_blocks_low_rr_setup(tmp_path: Path) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
     context_store.initialize()
@@ -340,7 +376,7 @@ def test_build_analysis_snapshot_allows_aligned_reversal_ifvg_live_setup_after_c
     assert snapshot.status == 'LIVE SETUP'
 
 
-def test_build_analysis_snapshot_allows_mixed_htf_when_5m_ifvg_is_clean_after_confirmation_tuning(
+def test_build_analysis_snapshot_keeps_counter_draw_5m_ifvg_waiting_without_full_exception(
     tmp_path: Path,
 ) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
@@ -396,11 +432,11 @@ def test_build_analysis_snapshot_allows_mixed_htf_when_5m_ifvg_is_clean_after_co
     assert snapshot.entry_model == '5M IFVG'
     assert snapshot.thesis.state == 'bullish'
     assert snapshot.requires_retrace is False
-    assert snapshot.needs_confirmation is False
-    assert snapshot.status == 'LIVE SETUP'
+    assert snapshot.needs_confirmation is True
+    assert snapshot.status == 'WAIT'
 
 
-def test_build_analysis_snapshot_marks_clear_directional_scalp_as_live_setup(
+def test_build_analysis_snapshot_marks_aligned_displacement_hold_scalp_as_live_setup(
     tmp_path: Path,
 ) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
@@ -413,29 +449,29 @@ def test_build_analysis_snapshot_marks_clear_directional_scalp_as_live_setup(
     _write_chart(
         chart_daily,
         [
-            ('2026-03-31T00:00:00-04:00', 24220.0, 24240.0, 24140.0, 24160.0),
-            ('2026-04-01T00:00:00-04:00', 24160.0, 24180.0, 24080.0, 24100.0),
-            ('2026-04-02T00:00:00-04:00', 24100.0, 24120.0, 24020.0, 24040.0),
+            ('2026-03-31T00:00:00-04:00', 120.0, 132.0, 118.0, 130.0),
+            ('2026-04-01T00:00:00-04:00', 130.0, 148.0, 128.0, 146.0),
+            ('2026-04-02T00:00:00-04:00', 146.0, 155.0, 140.0, 150.0),
         ],
     )
     _write_chart(
         chart_1h,
         [
-            ('2026-04-02T07:00:00-04:00', 24080.0, 24100.0, 24040.0, 24090.0),
-            ('2026-04-02T08:00:00-04:00', 24090.0, 24140.0, 24070.0, 24120.0),
-            ('2026-04-02T09:00:00-04:00', 24120.0, 24200.0, 24100.0, 24190.0),
+            ('2026-04-02T07:00:00-04:00', 138.0, 141.0, 136.0, 140.0),
+            ('2026-04-02T08:00:00-04:00', 140.0, 143.0, 139.0, 142.0),
+            ('2026-04-02T09:00:00-04:00', 142.0, 146.0, 141.0, 145.0),
         ],
     )
     _write_chart(
         chart_5,
         [
-            ('2026-04-02T09:10:00-04:00', 24080.0, 24084.0, 24074.0, 24078.0),
-            ('2026-04-02T09:15:00-04:00', 24078.0, 24080.0, 24070.0, 24072.0),
-            ('2026-04-02T09:20:00-04:00', 24072.0, 24074.0, 24064.0, 24066.0),
-            ('2026-04-02T09:25:00-04:00', 24066.0, 24068.0, 24058.0, 24060.0),
-            ('2026-04-02T09:30:00-04:00', 24060.0, 24056.0, 24050.0, 24052.0),
-            ('2026-04-02T09:35:00-04:00', 24052.0, 24078.0, 24050.0, 24074.0),
-            ('2026-04-02T09:40:00-04:00', 24074.0, 24108.0, 24072.0, 24092.0),
+            ('2026-04-02T09:10:00-04:00', 99.8, 100.0, 99.7, 99.9),
+            ('2026-04-02T09:15:00-04:00', 99.9, 100.2, 99.8, 100.0),
+            ('2026-04-02T09:20:00-04:00', 100.0, 100.5, 99.9, 100.3),
+            ('2026-04-02T09:25:00-04:00', 100.3, 100.4, 99.9, 99.95),
+            ('2026-04-02T09:30:00-04:00', 99.95, 100.0, 99.7, 99.8),
+            ('2026-04-02T09:35:00-04:00', 99.8, 100.0, 99.75, 99.9),
+            ('2026-04-02T09:40:00-04:00', 99.9, 101.0, 99.9, 100.8),
         ],
     )
 
@@ -458,9 +494,9 @@ def test_build_analysis_snapshot_marks_clear_directional_scalp_as_live_setup(
     )
 
     assert snapshot.status == 'LIVE SETUP'
-    assert snapshot.entry_model == '5M IFVG'
+    assert snapshot.entry_model == '5M Confirmation'
     assert snapshot.entry > snapshot.stop
-    assert snapshot.entry - snapshot.stop <= 15.0
+    assert snapshot.entry - snapshot.stop == 12.0
     assert 40.0 <= snapshot.target - snapshot.entry <= 50.0
 
 
@@ -527,6 +563,6 @@ def test_build_analysis_snapshot_waits_when_scalp_geometry_is_still_invalid(
     assert snapshot.status == 'WAIT'
     assert snapshot.needs_confirmation is True
     assert snapshot.requires_retrace is True
-    assert snapshot.entry == 0.0
-    assert snapshot.stop == 0.0
-    assert snapshot.target == 0.0
+    assert snapshot.entry > 0.0
+    assert snapshot.stop > 0.0
+    assert snapshot.target > 0.0

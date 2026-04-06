@@ -6,6 +6,7 @@ import math
 import pandas as pd
 
 from aict2.analysis.market_frame import ChartFrameFacts, format_price
+from aict2.analysis.pd_arrays import _detect_timeframe_arrays
 
 SCALP_EXECUTION_TIMEFRAMES = {'5M', '1M'}
 SCALP_STOP_FLOOR = 12.0
@@ -218,6 +219,42 @@ def _place_scalp_stop(
     return entry
 
 
+def _resolve_named_trigger_invalidation_price(
+    execution_frame: pd.DataFrame,
+    *,
+    bias: str,
+    execution_timeframe: str,
+) -> float | None:
+    if bias not in {'bullish', 'bearish'}:
+        return None
+
+    last_close = float(execution_frame['close'].iloc[-1])
+    zones = [
+        zone
+        for zone in _detect_timeframe_arrays(execution_frame, execution_timeframe)
+        if zone.array_type in {'IFVG', 'Breaker', 'FVG', 'OB', 'VI'} and zone.bias == bias
+    ]
+    if not zones:
+        return None
+
+    candidates: list[float] = []
+    for zone in zones:
+        if bias == 'bullish':
+            price = zone.upper if zone.upper < last_close else zone.lower
+            if price < last_close:
+                candidates.append(price)
+        else:
+            price = zone.lower if zone.lower > last_close else zone.upper
+            if price > last_close:
+                candidates.append(price)
+
+    if not candidates:
+        return None
+    if bias == 'bullish':
+        return max(candidates)
+    return min(candidates)
+
+
 def _resolve_scalp_target(
     *,
     entry: float,
@@ -393,6 +430,15 @@ def derive_scalp_trade_levels(
         entry_model=entry_model,
     )
     stop = _place_scalp_stop(entry=entry, invalidation=invalidation, bias=bias)
+    if abs(entry - stop) > SCALP_STOP_CEILING:
+        named_trigger_invalidation = _resolve_named_trigger_invalidation_price(
+            execution_frame,
+            bias=bias,
+            execution_timeframe=execution_timeframe,
+        )
+        if named_trigger_invalidation is not None:
+            invalidation = named_trigger_invalidation
+            stop = _place_scalp_stop(entry=entry, invalidation=invalidation, bias=bias)
     if abs(entry - stop) > SCALP_STOP_CEILING:
         return (
             0.0,

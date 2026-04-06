@@ -243,6 +243,136 @@ def _has_execution_confirmation_signal(
     return False
 
 
+def _derive_higher_timeframe_bias(
+    facts: dict[str, ChartFrameFacts],
+    *,
+    execution_timeframe: str,
+) -> str:
+    higher_timeframe_facts = {
+        timeframe: fact for timeframe, fact in facts.items() if timeframe != execution_timeframe
+    }
+    if not higher_timeframe_facts:
+        return "mixed"
+    return weighted_bias_score(higher_timeframe_facts)
+
+
+def _has_directional_hold(
+    *,
+    bias: str,
+    execution_reclaimed_high: bool,
+    execution_broke_low: bool,
+    liquidity_summary: str,
+) -> bool:
+    normalized_liquidity = liquidity_summary.lower()
+    if bias == "bullish":
+        return (
+            execution_reclaimed_high
+            or normalized_liquidity.startswith("sell-side liquidity sweep")
+            or normalized_liquidity.startswith("buy-side reclaim")
+        )
+    if bias == "bearish":
+        return (
+            execution_broke_low
+            or normalized_liquidity.startswith("buy-side liquidity sweep")
+            or normalized_liquidity.startswith("sell-side pressure")
+        )
+    return False
+
+
+def _has_displacement_plus_hold(
+    *,
+    bias: str,
+    execution_displacement: float,
+    execution_reclaimed_high: bool,
+    execution_broke_low: bool,
+    liquidity_summary: str,
+) -> bool:
+    return execution_displacement >= 1.2 and _has_directional_hold(
+        bias=bias,
+        execution_reclaimed_high=execution_reclaimed_high,
+        execution_broke_low=execution_broke_low,
+        liquidity_summary=liquidity_summary,
+    )
+
+
+def _is_aligned_with_higher_timeframe_draw(
+    *,
+    higher_timeframe_bias: str,
+    bias: str,
+    execution_bias: str,
+) -> bool:
+    return (
+        higher_timeframe_bias in {"bullish", "bearish"}
+        and bias == higher_timeframe_bias
+        and execution_bias == bias
+    )
+
+
+def _is_counter_draw_setup(
+    *,
+    higher_timeframe_bias: str,
+    bias: str,
+    execution_bias: str,
+) -> bool:
+    return (
+        higher_timeframe_bias in {"bullish", "bearish"}
+        and bias in {"bullish", "bearish"}
+        and execution_bias == bias
+        and bias != higher_timeframe_bias
+    )
+
+
+def _should_relax_retrace_requirement(
+    *,
+    raw_bias: str,
+    bias: str,
+    execution_bias: str,
+    execution_timeframe: str,
+    entry_model: str,
+    liquidity_summary: str,
+    execution_displacement: float,
+    execution_reclaimed_high: bool,
+    execution_broke_low: bool,
+    daily_profile: str,
+) -> bool:
+    if execution_timeframe != "5M":
+        return False
+    if bias not in {"bullish", "bearish"} or execution_bias != bias:
+        return False
+
+    named_trigger = _has_named_execution_trigger(
+        execution_timeframe=execution_timeframe,
+        entry_model=entry_model,
+        liquidity_summary=liquidity_summary,
+        execution_displacement=execution_displacement,
+    )
+    execution_signal = _has_execution_confirmation_signal(
+        bias=bias,
+        entry_model=entry_model,
+        execution_reclaimed_high=execution_reclaimed_high,
+        execution_broke_low=execution_broke_low,
+        liquidity_summary=liquidity_summary,
+    )
+    if not named_trigger or not execution_signal:
+        return False
+
+    normalized_entry_model = entry_model.lower()
+    has_confirmed_sweep = _has_confirmed_stop_run(liquidity_summary)
+    if ("ifvg" in normalized_entry_model or "breaker" in normalized_entry_model) and (
+        daily_profile == "reversal"
+    ) and not has_confirmed_sweep:
+        return True
+
+    if (
+        raw_bias == "mixed"
+        and execution_displacement >= 1.5
+        and "ifvg" not in normalized_entry_model
+        and "breaker" not in normalized_entry_model
+    ):
+        return True
+    return False
+
+
 def _resolve_execution_override_bias(
     *,
     raw_bias: str,
@@ -255,7 +385,18 @@ def _resolve_execution_override_bias(
         return raw_bias
     if execution_bias not in {"bullish", "bearish"}:
         return raw_bias
-    if requires_retrace(execution_bias, execution_fact):
+    if requires_retrace(execution_bias, execution_fact) and not _should_relax_retrace_requirement(
+        raw_bias=raw_bias,
+        bias=execution_bias,
+        execution_bias=execution_bias,
+        execution_timeframe=execution_timeframe,
+        entry_model=execution_entry_model,
+        liquidity_summary=execution_fact.liquidity_summary,
+        execution_displacement=execution_fact.displacement,
+        execution_reclaimed_high=execution_fact.reclaimed_high,
+        execution_broke_low=execution_fact.broke_low,
+        daily_profile="transition",
+    ):
         return raw_bias
     if not _has_named_execution_trigger(
         execution_timeframe=execution_timeframe,
@@ -314,6 +455,8 @@ def resolve_confirmation_requirement(
     entry_model: str,
     liquidity_summary: str,
     requires_retrace: bool,
+    higher_timeframe_bias: str = "mixed",
+    target_distance: float = 0.0,
 ) -> bool:
     if stop_run_confirmed:
         return False
@@ -332,6 +475,39 @@ def resolve_confirmation_requirement(
         execution_broke_low=execution_broke_low,
         liquidity_summary=liquidity_summary,
     )
+    displacement_plus_hold = _has_displacement_plus_hold(
+        bias=bias,
+        execution_displacement=execution_displacement,
+        execution_reclaimed_high=execution_reclaimed_high,
+        execution_broke_low=execution_broke_low,
+        liquidity_summary=liquidity_summary,
+    )
+
+    if _is_counter_draw_setup(
+        higher_timeframe_bias=higher_timeframe_bias,
+        bias=bias,
+        execution_bias=execution_bias,
+    ):
+        counter_draw_exception = (
+            execution_timeframe == "5M"
+            and _has_confirmed_stop_run(liquidity_summary)
+            and displacement_plus_hold
+            and target_distance >= 60.0
+            and not requires_retrace
+        )
+        return not counter_draw_exception
+
+    if (
+        execution_timeframe == "5M"
+        and _is_aligned_with_higher_timeframe_draw(
+            higher_timeframe_bias=higher_timeframe_bias,
+            bias=bias,
+            execution_bias=execution_bias,
+        )
+        and displacement_plus_hold
+        and not requires_retrace
+    ):
+        return False
 
     reversal_trigger = (
         daily_profile == "reversal"
@@ -466,6 +642,10 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
     execution_frame = frames[execution_timeframe]
     execution_fact = facts[execution_timeframe]
     raw_bias = weighted_bias_score(facts)
+    higher_timeframe_bias = _derive_higher_timeframe_bias(
+        facts,
+        execution_timeframe=execution_timeframe,
+    )
     execution_entry_model = derive_execution_entry_trigger(
         frames,
         bias=execution_fact.bias,
@@ -505,6 +685,19 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         execution_timeframe=execution_timeframe,
         requires_retrace=retrace_required,
     )
+    if retrace_required and _should_relax_retrace_requirement(
+        raw_bias=raw_bias,
+        bias=bias,
+        execution_bias=execution_fact.bias,
+        execution_timeframe=execution_timeframe,
+        entry_model=entry_model,
+        liquidity_summary=execution_fact.liquidity_summary,
+        execution_displacement=execution_fact.displacement,
+        execution_reclaimed_high=execution_fact.reclaimed_high,
+        execution_broke_low=execution_fact.broke_low,
+        daily_profile=daily_profile,
+    ):
+        retrace_required = False
     entry, stop, target, tp_model, target_reason = derive_trade_levels(
         execution_frame,
         bias,
@@ -528,6 +721,8 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         entry_model=entry_model,
         liquidity_summary=execution_fact.liquidity_summary,
         requires_retrace=retrace_required,
+        higher_timeframe_bias=higher_timeframe_bias,
+        target_distance=abs(target - entry),
     )
     if (
         not stop_run_confirmed

@@ -334,6 +334,23 @@ def _is_counter_draw_setup(
     )
 
 
+def _has_weak_higher_timeframe_conflict(
+    *,
+    raw_bias: str,
+    higher_timeframe_bias: str,
+    bias: str,
+    execution_bias: str,
+) -> bool:
+    return (
+        raw_bias == "mixed"
+        and _is_counter_draw_setup(
+            higher_timeframe_bias=higher_timeframe_bias,
+            bias=bias,
+            execution_bias=execution_bias,
+        )
+    )
+
+
 def _should_relax_retrace_requirement(
     *,
     raw_bias: str,
@@ -465,6 +482,7 @@ def resolve_confirmation_requirement(
     base_needs_confirmation: bool,
     stop_run_confirmed: bool,
     daily_profile: str,
+    raw_bias: str = "",
     bias: str,
     execution_bias: str,
     execution_displacement: float,
@@ -502,6 +520,23 @@ def resolve_confirmation_requirement(
         execution_broke_low=execution_broke_low,
         liquidity_summary=liquidity_summary,
     )
+    weak_higher_timeframe_conflict = _has_weak_higher_timeframe_conflict(
+        raw_bias=raw_bias,
+        higher_timeframe_bias=higher_timeframe_bias,
+        bias=bias,
+        execution_bias=execution_bias,
+    )
+
+    if (
+        weak_higher_timeframe_conflict
+        and execution_timeframe == "5M"
+        and daily_profile == "reversal"
+        and directional_execution
+        and named_trigger
+        and displacement_plus_hold
+        and not requires_retrace
+    ):
+        return False
 
     if _is_counter_draw_setup(
         higher_timeframe_bias=higher_timeframe_bias,
@@ -738,6 +773,7 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         base_needs_confirmation=confirmation_needed,
         stop_run_confirmed=stop_run_confirmed,
         daily_profile=daily_profile,
+        raw_bias=raw_bias,
         bias=bias,
         execution_bias=execution_fact.bias,
         execution_displacement=execution_fact.displacement,

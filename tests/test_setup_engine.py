@@ -410,6 +410,30 @@ def test_resolve_confirmation_requirement_allows_mixed_htf_aligned_5m_ifvg_witho
     )
 
 
+def test_resolve_confirmation_requirement_allows_weak_htf_conflict_reversal_ifvg_when_raw_bias_is_mixed() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="reversal",
+            raw_bias="mixed",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.8,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+            higher_timeframe_bias="bearish",
+            target_distance=45.0,
+        )
+        is False
+    )
+
+
 def test_resolve_confirmation_requirement_keeps_weak_reclaim_waiting_without_ifvg() -> None:
     assert (
         resolve_confirmation_requirement(

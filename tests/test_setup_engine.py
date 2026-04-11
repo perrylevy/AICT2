@@ -387,6 +387,29 @@ def test_resolve_confirmation_requirement_allows_aligned_5m_displacement_plus_ho
     )
 
 
+def test_resolve_confirmation_requirement_allows_mixed_htf_aligned_5m_ifvg_without_opposing_draw() -> None:
+    assert (
+        resolve_confirmation_requirement(
+            base_needs_confirmation=True,
+            stop_run_confirmed=False,
+            daily_profile="continuation",
+            bias="bullish",
+            execution_bias="bullish",
+            execution_displacement=1.6,
+            execution_reclaimed_high=True,
+            execution_broke_low=False,
+            execution_bias_override_active=False,
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side reclaim through recent swing high 24090.00",
+            requires_retrace=False,
+            higher_timeframe_bias="mixed",
+            target_distance=45.0,
+        )
+        is False
+    )
+
+
 def test_resolve_confirmation_requirement_keeps_weak_reclaim_waiting_without_ifvg() -> None:
     assert (
         resolve_confirmation_requirement(
@@ -536,6 +559,7 @@ def test_should_relax_retrace_requirement_for_aligned_reversal_ifvg() -> None:
         _should_relax_retrace_requirement(
             raw_bias="bullish",
             bias="bullish",
+            higher_timeframe_bias="bullish",
             execution_bias="bullish",
             execution_timeframe="5M",
             entry_model="5M IFVG",
@@ -554,6 +578,7 @@ def test_should_not_relax_retrace_requirement_for_weak_mixed_extension() -> None
         _should_relax_retrace_requirement(
             raw_bias="mixed",
             bias="bullish",
+            higher_timeframe_bias="mixed",
             execution_bias="bullish",
             execution_timeframe="5M",
             entry_model="5M Confirmation",
@@ -572,6 +597,7 @@ def test_should_not_relax_retrace_requirement_for_mixed_ifvg_extension() -> None
         _should_relax_retrace_requirement(
             raw_bias="mixed",
             bias="bearish",
+            higher_timeframe_bias="mixed",
             execution_bias="bearish",
             execution_timeframe="5M",
             entry_model="5M IFVG",
@@ -585,11 +611,31 @@ def test_should_not_relax_retrace_requirement_for_mixed_ifvg_extension() -> None
     )
 
 
-def test_should_not_relax_retrace_requirement_for_confirmed_stop_run_reversal() -> None:
+def test_should_relax_retrace_requirement_for_confirmed_stop_run_reversal_with_aligned_htf() -> None:
     assert (
         _should_relax_retrace_requirement(
             raw_bias="bearish",
             bias="bearish",
+            higher_timeframe_bias="bearish",
+            execution_bias="bearish",
+            execution_timeframe="5M",
+            entry_model="5M IFVG",
+            liquidity_summary="Buy-side liquidity sweep above 23621.25 with bearish close-back-in",
+            execution_displacement=3.14,
+            execution_reclaimed_high=False,
+            execution_broke_low=True,
+            daily_profile="reversal",
+        )
+        is True
+    )
+
+
+def test_should_not_relax_retrace_requirement_for_confirmed_stop_run_reversal_against_htf() -> None:
+    assert (
+        _should_relax_retrace_requirement(
+            raw_bias="bearish",
+            bias="bearish",
+            higher_timeframe_bias="bullish",
             execution_bias="bearish",
             execution_timeframe="5M",
             entry_model="5M IFVG",
@@ -687,7 +733,7 @@ def test_derive_setup_plan_keeps_confirmation_required_without_real_stop_run(
     assert plan.needs_confirmation is True
 
 
-def test_derive_setup_plan_keeps_counter_draw_5m_ifvg_waiting_without_full_exception(
+def test_derive_setup_plan_promotes_mixed_htf_5m_ifvg_when_no_opposing_draw_exists(
     tmp_path: Path,
 ) -> None:
     chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
@@ -696,29 +742,29 @@ def test_derive_setup_plan_keeps_counter_draw_5m_ifvg_waiting_without_full_excep
     _write_chart(
         chart_daily,
         [
-            ("2026-03-31T00:00:00-04:00", 24220.0, 24240.0, 24140.0, 24160.0),
-            ("2026-04-01T00:00:00-04:00", 24160.0, 24180.0, 24080.0, 24100.0),
-            ("2026-04-02T00:00:00-04:00", 24100.0, 24120.0, 24020.0, 24040.0),
+            ("2026-03-31T00:00:00-04:00", 130.0, 148.0, 118.0, 130.0),
+            ("2026-04-01T00:00:00-04:00", 130.0, 146.0, 120.0, 129.0),
+            ("2026-04-02T00:00:00-04:00", 129.0, 145.0, 121.0, 131.0),
         ],
     )
     _write_chart(
         chart_1h,
         [
-            ("2026-04-02T07:00:00-04:00", 24080.0, 24100.0, 24040.0, 24090.0),
-            ("2026-04-02T08:00:00-04:00", 24090.0, 24140.0, 24070.0, 24120.0),
-            ("2026-04-02T09:00:00-04:00", 24120.0, 24200.0, 24100.0, 24190.0),
+            ("2026-04-02T07:00:00-04:00", 140.0, 144.0, 138.0, 140.0),
+            ("2026-04-02T08:00:00-04:00", 140.0, 146.0, 139.0, 141.0),
+            ("2026-04-02T09:00:00-04:00", 141.0, 145.0, 140.0, 141.75),
         ],
     )
     _write_chart(
         chart_5,
         [
-            ("2026-04-02T09:10:00-04:00", 24080.0, 24090.0, 24070.0, 24078.0),
-            ("2026-04-02T09:15:00-04:00", 24078.0, 24082.0, 24060.0, 24064.0),
-            ("2026-04-02T09:20:00-04:00", 24064.0, 24070.0, 24050.0, 24054.0),
-            ("2026-04-02T09:25:00-04:00", 24054.0, 24058.0, 24040.0, 24044.0),
-            ("2026-04-02T09:30:00-04:00", 24044.0, 24042.0, 24020.0, 24024.0),
-            ("2026-04-02T09:35:00-04:00", 24024.0, 24080.0, 24022.0, 24078.0),
-            ("2026-04-02T09:40:00-04:00", 24078.0, 24150.0, 24076.0, 24128.0),
+            ("2026-04-02T09:10:00-04:00", 99.8, 100.0, 99.7, 99.9),
+            ("2026-04-02T09:15:00-04:00", 99.9, 100.2, 99.8, 100.0),
+            ("2026-04-02T09:20:00-04:00", 100.0, 100.5, 99.9, 100.3),
+            ("2026-04-02T09:25:00-04:00", 100.3, 100.4, 99.9, 99.95),
+            ("2026-04-02T09:30:00-04:00", 99.95, 100.0, 99.7, 99.8),
+            ("2026-04-02T09:35:00-04:00", 99.8, 100.0, 99.75, 99.9),
+            ("2026-04-02T09:40:00-04:00", 99.9, 101.0, 99.9, 100.8),
         ],
     )
 
@@ -726,9 +772,9 @@ def test_derive_setup_plan_keeps_counter_draw_5m_ifvg_waiting_without_full_excep
 
     assert plan is not None
     assert plan.bias == "bullish"
-    assert plan.entry_model == "5M IFVG"
+    assert plan.entry_model == "5M Confirmation"
     assert plan.requires_retrace is False
-    assert plan.needs_confirmation is True
+    assert plan.needs_confirmation is False
 
 
 def test_derive_setup_plan_uses_15m_ifvg_as_entry_trigger_when_available(

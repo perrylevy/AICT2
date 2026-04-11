@@ -295,6 +295,14 @@ def _has_displacement_plus_hold(
     )
 
 
+def _has_explicit_execution_acceptance(
+    *,
+    liquidity_summary: str,
+) -> bool:
+    normalized_liquidity = liquidity_summary.lower()
+    return not normalized_liquidity.startswith("no clear liquidity sweep")
+
+
 def _is_aligned_with_higher_timeframe_draw(
     *,
     higher_timeframe_bias: str,
@@ -302,8 +310,12 @@ def _is_aligned_with_higher_timeframe_draw(
     execution_bias: str,
 ) -> bool:
     return (
-        higher_timeframe_bias in {"bullish", "bearish"}
+        higher_timeframe_bias in {"bullish", "bearish", "mixed"}
         and bias == higher_timeframe_bias
+        and execution_bias == bias
+    ) or (
+        higher_timeframe_bias == "mixed"
+        and bias in {"bullish", "bearish"}
         and execution_bias == bias
     )
 
@@ -326,6 +338,7 @@ def _should_relax_retrace_requirement(
     *,
     raw_bias: str,
     bias: str,
+    higher_timeframe_bias: str = "mixed",
     execution_bias: str,
     execution_timeframe: str,
     entry_model: str,
@@ -360,8 +373,14 @@ def _should_relax_retrace_requirement(
     has_confirmed_sweep = _has_confirmed_stop_run(liquidity_summary)
     if ("ifvg" in normalized_entry_model or "breaker" in normalized_entry_model) and (
         daily_profile == "reversal"
-    ) and not has_confirmed_sweep:
-        return True
+    ):
+        if not has_confirmed_sweep:
+            return True
+        if (
+            higher_timeframe_bias == bias
+            and execution_displacement >= 2.5
+        ):
+            return True
 
     if (
         raw_bias == "mixed"
@@ -388,6 +407,7 @@ def _resolve_execution_override_bias(
     if requires_retrace(execution_bias, execution_fact) and not _should_relax_retrace_requirement(
         raw_bias=raw_bias,
         bias=execution_bias,
+        higher_timeframe_bias="mixed",
         execution_bias=execution_bias,
         execution_timeframe=execution_timeframe,
         entry_model=execution_entry_model,
@@ -505,6 +525,11 @@ def resolve_confirmation_requirement(
             execution_bias=execution_bias,
         )
         and displacement_plus_hold
+        and (
+            higher_timeframe_bias != "mixed"
+            or named_trigger
+            or _has_explicit_execution_acceptance(liquidity_summary=liquidity_summary)
+        )
         and not requires_retrace
     ):
         return False
@@ -685,9 +710,10 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         execution_timeframe=execution_timeframe,
         requires_retrace=retrace_required,
     )
-    if retrace_required and _should_relax_retrace_requirement(
+    retrace_relaxation_candidate = retrace_required and _should_relax_retrace_requirement(
         raw_bias=raw_bias,
         bias=bias,
+        higher_timeframe_bias=higher_timeframe_bias,
         execution_bias=execution_fact.bias,
         execution_timeframe=execution_timeframe,
         entry_model=entry_model,
@@ -696,8 +722,7 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         execution_reclaimed_high=execution_fact.reclaimed_high,
         execution_broke_low=execution_fact.broke_low,
         daily_profile=daily_profile,
-    ):
-        retrace_required = False
+    )
     entry, stop, target, tp_model, target_reason = derive_trade_levels(
         execution_frame,
         bias,
@@ -707,6 +732,8 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         draw_on_liquidity=draw_on_liquidity,
         has_higher_timeframe_context=has_higher_timeframe_context,
     )
+    if retrace_relaxation_candidate and entry > 0.0 and stop > 0.0 and target > 0.0:
+        retrace_required = False
     confirmation_needed = resolve_confirmation_requirement(
         base_needs_confirmation=confirmation_needed,
         stop_run_confirmed=stop_run_confirmed,

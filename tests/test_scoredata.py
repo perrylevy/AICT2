@@ -141,6 +141,79 @@ def test_replay_live_setup_prefers_frame_scoring_when_available(tmp_path: Path, 
     assert seen["frame"] is score_frame
 
 
+def test_replay_live_setup_falls_back_to_csv_when_score_frame_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = SimpleNamespace(
+        case_id="case-1",
+        score_path=tmp_path / "CME_MINI_MNQ1!, 1.csv",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        execution_timeframe="5M",
+    )
+    snapshot = SimpleNamespace(
+        instrument="MNQ1!",
+        status="LIVE SETUP",
+        thesis=SimpleNamespace(state="bullish"),
+        entry=20000.0,
+        stop=19990.0,
+        target=20035.0,
+    )
+    seen: dict[str, object] = {}
+
+    def fake_score_csv_against_records(csv_path, records):
+        seen["csv_path"] = csv_path
+        seen["records"] = records
+        return [ScoredTrade(message_id="case-1", outcome="TP_HIT", score=1.0)]
+
+    def fail_score_frame_against_records(*args, **kwargs):
+        raise AssertionError("Frame scoring should not run when score_frame is missing")
+
+    monkeypatch.setattr("aict2.backtest.scoring.score_csv_against_records", fake_score_csv_against_records)
+    monkeypatch.setattr("aict2.backtest.scoring.score_frame_against_records", fail_score_frame_against_records)
+
+    replay = replay_live_setup(case, snapshot)
+
+    assert replay.outcome == "TP_HIT"
+    assert replay.score == 1.0
+    assert seen["csv_path"] == case.score_path
+
+
+def test_replay_live_setup_falls_back_to_csv_when_score_frame_is_unusable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    case = SimpleNamespace(
+        case_id="case-1",
+        score_path=tmp_path / "CME_MINI_MNQ1!, 1.csv",
+        score_frame=pd.DataFrame(
+            columns=["Time", "Open", "High", "Low", "Close"]
+        ),
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        execution_timeframe="5M",
+    )
+    snapshot = SimpleNamespace(
+        instrument="MNQ1!",
+        status="LIVE SETUP",
+        thesis=SimpleNamespace(state="bullish"),
+        entry=20000.0,
+        stop=19990.0,
+        target=20035.0,
+    )
+    seen: dict[str, object] = {}
+
+    def fake_score_csv_against_records(csv_path, records):
+        seen["csv_path"] = csv_path
+        seen["records"] = records
+        return [ScoredTrade(message_id="case-1", outcome="TP_HIT", score=1.0)]
+
+    monkeypatch.setattr("aict2.backtest.scoring.score_csv_against_records", fake_score_csv_against_records)
+
+    replay = replay_live_setup(case, snapshot)
+
+    assert replay.outcome == "TP_HIT"
+    assert replay.score == 1.0
+    assert seen["csv_path"] == case.score_path
+
+
 def test_score_csv_against_records_marks_sl_hit(tmp_path: Path) -> None:
     csv_path = tmp_path / "CME_MINI_MNQ1!, 1.csv"
     _write_csv(

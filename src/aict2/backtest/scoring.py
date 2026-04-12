@@ -39,9 +39,11 @@ def _score_trade_record(
             pass
         else:
             try:
-                return score_frame_against_records(
+                scored = score_frame_against_records(
                     score_frame, instrument=snapshot.instrument, records=[record]
                 )
+                if scored:
+                    return scored
             except (AttributeError, TypeError, ValueError):
                 pass
     if case.score_path:

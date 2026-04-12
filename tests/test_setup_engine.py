@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from aict2.analysis.session_levels import (
+    derive_session_levels_from_frames,
+    derive_session_levels_from_paths,
+)
 from aict2.analysis.setup_engine import (
     _resolve_execution_override_bias,
     _should_relax_retrace_requirement,
@@ -14,6 +20,8 @@ from aict2.analysis.setup_engine import (
     resolve_target_and_tp_model,
 )
 from aict2.analysis.market_frame import ChartFrameFacts
+
+ET = ZoneInfo('America/New_York')
 
 
 def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]]) -> None:
@@ -28,54 +36,113 @@ def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]])
 
 
 def test_derive_setup_plan_from_frames_matches_path_variant(tmp_path: Path) -> None:
-    daily = pd.DataFrame(
+    four_hour = pd.DataFrame(
         {
             "time": [
-                "2026-03-31T00:00:00-04:00",
-                "2026-04-01T00:00:00-04:00",
-                "2026-04-02T00:00:00-04:00",
+                "2026-04-01T18:00:00-04:00",
+                "2026-04-01T22:00:00-04:00",
+                "2026-04-02T02:00:00-04:00",
+                "2026-04-02T06:00:00-04:00",
             ],
-            "open": [23960.0, 24050.0, 24120.0],
-            "high": [24020.0, 24110.0, 24210.0],
-            "low": [23920.0, 24000.0, 24090.0],
-            "close": [23980.0, 24090.0, 24180.0],
+            "open": [23920.0, 23970.0, 24060.0, 24100.0],
+            "high": [23980.0, 24010.0, 24120.0, 24140.0],
+            "low": [23890.0, 23940.0, 24050.0, 24080.0],
+            "close": [23970.0, 23990.0, 24100.0, 24110.0],
         }
     )
-    five = pd.DataFrame(
+    fifteen = pd.DataFrame(
         {
             "time": [
+                "2026-04-02T09:15:00-04:00",
                 "2026-04-02T09:30:00-04:00",
-                "2026-04-02T09:35:00-04:00",
-                "2026-04-02T09:40:00-04:00",
                 "2026-04-02T09:45:00-04:00",
-                "2026-04-02T09:50:00-04:00",
-                "2026-04-02T09:55:00-04:00",
                 "2026-04-02T10:00:00-04:00",
             ],
-            "open": [100.0, 99.2, 98.9, 98.1, 97.6, 99.1, 100.7],
-            "high": [100.5, 99.8, 99.0, 98.5, 99.2, 100.8, 102.4],
-            "low": [99.0, 98.7, 97.8, 97.2, 97.5, 99.0, 100.6],
-            "close": [99.2, 98.9, 98.1, 97.6, 99.1, 100.7, 102.1],
+            "open": [24092.0, 24086.0, 24048.0, 24066.0],
+            "high": [24102.0, 24088.0, 24070.0, 24096.0],
+            "low": [24080.0, 24040.0, 24042.0, 24060.0],
+            "close": [24086.0, 24048.0, 24066.0, 24090.0],
+        }
+    )
+    one = pd.DataFrame(
+        {
+            "time": [
+                "2026-04-02T09:57:00-04:00",
+                "2026-04-02T09:58:00-04:00",
+                "2026-04-02T09:59:00-04:00",
+                "2026-04-02T10:00:00-04:00",
+                "2026-04-02T10:01:00-04:00",
+            ],
+            "open": [24060.0, 24064.0, 24066.0, 24069.0, 24075.0],
+            "high": [24066.0, 24068.0, 24070.0, 24076.0, 24082.0],
+            "low": [24058.0, 24062.0, 24064.0, 24068.0, 24074.0],
+            "close": [24064.0, 24066.0, 24069.0, 24075.0, 24081.0],
         }
     )
 
-    chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
-    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
-    _write_chart(chart_daily, list(daily.itertuples(index=False, name=None)))
-    _write_chart(chart_5, list(five.itertuples(index=False, name=None)))
+    chart_4h = tmp_path / "CME_MINI_MNQ1!, 240.csv"
+    chart_15 = tmp_path / "CME_MINI_MNQ1!, 15.csv"
+    chart_1 = tmp_path / "CME_MINI_MNQ1!, 1.csv"
+    _write_chart(chart_4h, list(four_hour.itertuples(index=False, name=None)))
+    _write_chart(chart_15, list(fifteen.itertuples(index=False, name=None)))
+    _write_chart(chart_1, list(one.itertuples(index=False, name=None)))
 
-    path_plan = derive_setup_plan([str(chart_daily), str(chart_5)])
-    plan = derive_setup_plan_from_frames({"Daily": daily, "5M": five})
+    path_plan = derive_setup_plan([str(chart_4h), str(chart_15), str(chart_1)])
+    plan = derive_setup_plan_from_frames({"4H": four_hour, "15M": fifteen, "1M": one})
 
     assert plan is not None
     assert path_plan is not None
-    assert plan.bias == path_plan.bias
-    assert plan.entry == path_plan.entry
-    assert plan.stop == path_plan.stop
-    assert plan.target == path_plan.target
-    assert plan.entry > 0.0
-    assert plan.stop > 0.0
-    assert plan.target > 0.0
+    assert plan == path_plan
+    assert plan.stop_run_summary.startswith("No confirmed stop run")
+    assert plan.needs_confirmation is True
+    assert plan.requires_retrace is True
+    assert plan.entry == 0.0
+    assert plan.stop == 0.0
+    assert plan.target == 0.0
+
+
+def test_derive_session_levels_from_frames_matches_path_variant(tmp_path: Path) -> None:
+    five = pd.DataFrame(
+        {
+            "time": [
+                "2026-04-01T18:00:00-04:00",
+                "2026-04-01T21:00:00-04:00",
+                "2026-04-01T23:55:00-04:00",
+                "2026-04-02T00:30:00-04:00",
+                "2026-04-02T05:30:00-04:00",
+                "2026-04-01T15:55:00-04:00",
+                "2026-04-02T09:30:00-04:00",
+                "2026-04-02T10:15:00-04:00",
+                "2026-04-02T11:45:00-04:00",
+                "2026-04-02T13:15:00-04:00",
+                "2026-04-02T15:30:00-04:00",
+            ],
+            "open": [23990.0, 24005.0, 24020.0, 24015.0, 24060.0, 23940.0, 24010.0, 24035.0, 24095.0, 24070.0, 24120.0],
+            "high": [24010.0, 24040.0, 24035.0, 24070.0, 24080.0, 23960.0, 24040.0, 24110.0, 24120.0, 24140.0, 24155.0],
+            "low": [23980.0, 23970.0, 24000.0, 24005.0, 24010.0, 23920.0, 23995.0, 24025.0, 24050.0, 24060.0, 24090.0],
+            "close": [24005.0, 24020.0, 24015.0, 24060.0, 24020.0, 23950.0, 24035.0, 24095.0, 24070.0, 24120.0, 24100.0],
+        }
+    )
+
+    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
+    _write_chart(chart_5, list(five.itertuples(index=False, name=None)))
+
+    path_levels = derive_session_levels_from_paths(
+        [str(chart_5)],
+        current_time=datetime(2026, 4, 2, 15, 30, tzinfo=ET),
+    )
+    frame_levels = derive_session_levels_from_frames(
+        {"5M": five},
+        current_time=datetime(2026, 4, 2, 15, 30, tzinfo=ET),
+    )
+
+    assert frame_levels is not None
+    assert path_levels is not None
+    assert frame_levels == path_levels
+    assert frame_levels.rth_gap == "RTH Gap H 24010.00 / L 23950.00 / CE 23980.00"
+    assert frame_levels.interaction == (
+        "Swept NY AM high and closed back below | Holding above RTH Gap high"
+    )
 
 
 def test_derive_setup_plan_builds_deterministic_plan_from_charts(tmp_path: Path) -> None:

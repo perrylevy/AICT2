@@ -172,14 +172,14 @@ def load_chart_frames(
 ) -> dict[str, pd.DataFrame]:
     from pathlib import Path
 
-    frames: dict[str, pd.DataFrame] = {}
+    raw_frames: dict[str, pd.DataFrame] = {}
     for file_path in file_paths:
         path = Path(file_path)
         if not path.exists():
             continue
         _, timeframe = parse_chart_file_name(path.name)
-        frames[timeframe] = normalize_frame(pd.read_csv(path))
-    return frames
+        raw_frames[timeframe] = pd.read_csv(path)
+    return load_chart_frames_from_mapping(raw_frames)
 
 
 def load_chart_frames_from_mapping(

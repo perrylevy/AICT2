@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from aict2.analysis.analysis_service import build_analysis_snapshot
+from aict2.analysis.analysis_service import build_analysis_snapshot_from_frames
 from aict2.backtest.models import (
     BacktestCase,
     BacktestCaseResult,
@@ -57,6 +58,22 @@ def _runtime_failure_result(case: BacktestCase, exc: Exception) -> BacktestCaseR
 def _analyze_case(
     case: BacktestCase, memory_store: StructuralMemoryStore | None = None
 ):
+    if case.analysis_frames is not None:
+        if case.instrument is None:
+            raise ValueError("Backtest case is missing instrument for in-memory analysis")
+        return build_analysis_snapshot_from_frames(
+            instrument=case.instrument,
+            analysis_frames=case.analysis_frames,
+            current_time=case.analysis_timestamp,
+            macro_state="Mixed",
+            vix=18.0,
+            bias=None,
+            daily_profile=None,
+            entry=0.0,
+            stop=0.0,
+            target=0.0,
+            memory_store=memory_store,
+        )
     return build_analysis_snapshot(
         file_names=[path.name for path in case.analysis_paths],
         file_paths=[str(path) for path in case.analysis_paths],
@@ -73,6 +90,29 @@ def _analyze_case(
 
 
 def _execution_only_case(case: BacktestCase) -> BacktestCase:
+    if case.analysis_frames is not None:
+        if case.execution_timeframe is None:
+            raise ValueError("Missing execution timeframe chart for comparison")
+        execution_frames = {
+            timeframe: frame
+            for timeframe, frame in case.analysis_frames.items()
+            if timeframe == case.execution_timeframe
+        }
+        if len(execution_frames) != 1:
+            raise ValueError("Missing execution timeframe chart for comparison")
+        return BacktestCase(
+            case_id=case.case_id,
+            case_path=case.case_path,
+            analysis_paths=(),
+            score_path=case.score_path,
+            instrument=case.instrument,
+            ordered_timeframes=(case.execution_timeframe,),
+            execution_timeframe=case.execution_timeframe,
+            analysis_timestamp=case.analysis_timestamp,
+            validation_error=case.validation_error,
+            analysis_frames=execution_frames,
+            score_frame=case.score_frame,
+        )
     execution_paths = tuple(
         path
         for path in case.analysis_paths
@@ -99,7 +139,10 @@ def _build_comparison(
     snapshot,
     memory_store: StructuralMemoryStore | None = None,
 ) -> BacktestComparison | None:
-    if len(case.analysis_paths) <= 1 or case.execution_timeframe is None:
+    analysis_count = (
+        len(case.analysis_frames) if case.analysis_frames is not None else len(case.analysis_paths)
+    )
+    if analysis_count <= 1 or case.execution_timeframe is None:
         return None
     execution_only_snapshot = _analyze_case(_execution_only_case(case), memory_store=memory_store)
     return BacktestComparison(

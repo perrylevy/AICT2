@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+
 
 @dataclass(frozen=True, slots=True)
 class BacktestCase:
@@ -16,6 +18,8 @@ class BacktestCase:
     execution_timeframe: str | None
     analysis_timestamp: datetime | None
     validation_error: str | None = None
+    analysis_frames: dict[str, pd.DataFrame] | None = None
+    score_frame: pd.DataFrame | None = None
 
 
 @dataclass(frozen=True, slots=True)

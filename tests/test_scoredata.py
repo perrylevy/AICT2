@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 
+from aict2.backtest.scoring import replay_live_setup
 from aict2.reporting.analysis_records import AnalysisRecord
-from aict2.reporting.scoredata import score_csv_against_records
+from aict2.reporting.scoredata import (
+    ScoredTrade,
+    score_csv_against_records,
+    score_frame_against_records,
+)
 
 ET = ZoneInfo("America/New_York")
 DOWNLOADS = Path(r"C:\Users\Psus\Downloads")
@@ -53,6 +60,85 @@ def test_score_csv_against_records_marks_tp_hit(tmp_path: Path) -> None:
     assert scored[0].message_id == "msg-1"
     assert scored[0].outcome == "TP_HIT"
     assert scored[0].score == 1.0
+
+
+def test_score_frame_against_records_matches_csv_logic(tmp_path: Path) -> None:
+    csv_path = tmp_path / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        csv_path,
+        [
+            ("2026-04-02T13:56:00Z", 20002, 20004, 19998, 20001),
+            ("2026-04-02T13:57:00Z", 20001, 20036, 19999, 20030),
+        ],
+    )
+    frame = pd.DataFrame(
+        [
+            {"Time": "2026-04-02T13:56:00Z", "Open": 20002, "High": 20004, "Low": 19998, "Close": 20001},
+            {"Time": "2026-04-02T13:57:00Z", "Open": 20001, "High": 20036, "Low": 19999, "Close": 20030},
+        ]
+    )
+    record = AnalysisRecord(
+        message_id="msg-1",
+        instrument="MNQ1!",
+        status="LIVE SETUP",
+        direction="LONG",
+        confidence=65,
+        outcome=None,
+        score=None,
+        analyzed_at=datetime(2026, 4, 2, 9, 55, tzinfo=ET).isoformat(),
+        entry=20000.0,
+        stop=19990.0,
+        target=20035.0,
+    )
+
+    csv_scored = score_csv_against_records(csv_path, [record])
+    frame_scored = score_frame_against_records(frame, instrument="MNQ1!", records=[record])
+
+    assert frame_scored == csv_scored
+
+
+def test_replay_live_setup_prefers_frame_scoring_when_available(tmp_path: Path, monkeypatch) -> None:
+    score_frame = pd.DataFrame(
+        [
+            {"Time": "2026-04-02T13:56:00Z", "Open": 20002, "High": 20004, "Low": 19998, "Close": 20001},
+            {"Time": "2026-04-02T13:57:00Z", "Open": 20001, "High": 20036, "Low": 19999, "Close": 20030},
+        ]
+    )
+    case = SimpleNamespace(
+        case_id="case-1",
+        score_path=tmp_path / "CME_MINI_MNQ1!, 1.csv",
+        score_frame=score_frame,
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        execution_timeframe="5M",
+    )
+    snapshot = SimpleNamespace(
+        instrument="MNQ1!",
+        status="LIVE SETUP",
+        thesis=SimpleNamespace(state="bullish"),
+        entry=20000.0,
+        stop=19990.0,
+        target=20035.0,
+    )
+    seen: dict[str, object] = {}
+
+    def fake_score_frame_against_records(frame, *, instrument, records):
+        seen["instrument"] = instrument
+        seen["frame"] = frame
+        seen["records"] = records
+        return [ScoredTrade(message_id="case-1", outcome="TP_HIT", score=1.0)]
+
+    def fail_score_csv_against_records(*args, **kwargs):
+        raise AssertionError("CSV scoring should not run when score_frame is available")
+
+    monkeypatch.setattr("aict2.backtest.scoring.score_frame_against_records", fake_score_frame_against_records)
+    monkeypatch.setattr("aict2.backtest.scoring.score_csv_against_records", fail_score_csv_against_records)
+
+    replay = replay_live_setup(case, snapshot)
+
+    assert replay.outcome == "TP_HIT"
+    assert replay.score == 1.0
+    assert seen["instrument"] == "MNQ1!"
+    assert seen["frame"] is score_frame
 
 
 def test_score_csv_against_records_marks_sl_hit(tmp_path: Path) -> None:

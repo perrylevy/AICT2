@@ -25,8 +25,8 @@ def _parse_instrument_from_csv_path(csv_path: Path) -> str:
     return instrument
 
 
-def _load_ohlc(csv_path: Path) -> pd.DataFrame:
-    frame = pd.read_csv(csv_path)
+def _normalize_ohlc_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    frame = frame.copy()
     frame = frame.rename(columns={column: column.capitalize() for column in frame.columns})
     required = {'Time', 'Open', 'High', 'Low', 'Close'}
     if not required.issubset(frame.columns):
@@ -39,6 +39,10 @@ def _load_ohlc(csv_path: Path) -> pd.DataFrame:
     else:
         frame.index = frame.index.tz_convert('UTC')
     return frame
+
+
+def _load_ohlc(csv_path: Path) -> pd.DataFrame:
+    return _normalize_ohlc_frame(pd.read_csv(csv_path))
 
 
 def _end_of_trade_day_utc(posted_at: datetime) -> datetime:
@@ -102,3 +106,13 @@ def score_csv_against_records(csv_path: Path, records: list[AnalysisRecord]) -> 
         return []
     frame = _load_ohlc(csv_path)
     return [_resolve_outcome(frame, record) for record in matching]
+
+
+def score_frame_against_records(
+    frame: pd.DataFrame, *, instrument: str, records: list[AnalysisRecord]
+) -> list[ScoredTrade]:
+    matching = [record for record in records if record.instrument == instrument]
+    if not matching:
+        return []
+    normalized = _normalize_ohlc_frame(frame)
+    return [_resolve_outcome(normalized, record) for record in matching]

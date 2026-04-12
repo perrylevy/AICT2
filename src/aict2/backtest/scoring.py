@@ -5,7 +5,7 @@ from datetime import timedelta
 from aict2.analysis.analysis_service import AnalysisSnapshot
 from aict2.backtest.models import BacktestCase, BacktestTradeReplay
 from aict2.reporting.analysis_record_model import AnalysisRecord
-from aict2.reporting.scoredata import score_csv_against_records
+from aict2.reporting.scoredata import score_csv_against_records, score_frame_against_records
 
 _TIMEFRAME_DELTAS = {
     "30S": timedelta(seconds=30),
@@ -47,7 +47,13 @@ def replay_live_setup(case: BacktestCase, snapshot: AnalysisSnapshot) -> Backtes
         stop=snapshot.stop,
         target=snapshot.target,
     )
-    scored = score_csv_against_records(case.score_path, [record]) if case.score_path else []
+    score_frame = getattr(case, "score_frame", None)
+    if score_frame is not None:
+        scored = score_frame_against_records(score_frame, instrument=snapshot.instrument, records=[record])
+    elif case.score_path:
+        scored = score_csv_against_records(case.score_path, [record])
+    else:
+        scored = []
     if not scored:
         return BacktestTradeReplay(outcome="NO_SETUP", score=None)
     return BacktestTradeReplay(outcome=scored[0].outcome, score=scored[0].score)

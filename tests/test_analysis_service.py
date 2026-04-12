@@ -32,6 +32,21 @@ def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]])
     )
 
 
+def _tradingview_frame(
+    rows: list[tuple[str, float, float, float, float, int]]
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            'time': [row[0] for row in rows],
+            'open': [row[1] for row in rows],
+            'high': [row[2] for row in rows],
+            'low': [row[3] for row in rows],
+            'close': [row[4] for row in rows],
+            'volume': [row[5] for row in rows],
+        }
+    )
+
+
 def test_build_analysis_snapshot_for_multi_chart_setup_saves_memory(tmp_path: Path) -> None:
     context_store = ContextStore(tmp_path / 'aict2.db')
     context_store.initialize()
@@ -138,9 +153,34 @@ def test_build_analysis_snapshot_from_frames_matches_file_based_parity(
     frame_based = build_analysis_snapshot_from_frames(
         instrument='MNQ1!',
         analysis_frames={
-            '15M': pd.read_csv(chart_15),
-            '5M': pd.read_csv(chart_5),
-            '1M': pd.read_csv(chart_1),
+            '15M': _tradingview_frame(
+                [
+                    ('2026-04-01T00:00:00-04:00', 19940.0, 20010.0, 19920.0, 19988.0, 2200),
+                    ('2026-04-02T00:00:00-04:00', 19988.0, 20042.0, 19970.0, 20018.0, 2450),
+                ]
+            ),
+            '5M': _tradingview_frame(
+                [
+                    ('2026-04-02T09:30:00-04:00', 20000.0, 20008.0, 19996.0, 20005.0, 5100),
+                    ('2026-04-02T09:35:00-04:00', 20005.0, 20018.0, 20003.0, 20015.0, 4875),
+                    ('2026-04-02T09:40:00-04:00', 20015.0, 20028.0, 20012.0, 20024.0, 5325),
+                    ('2026-04-02T09:45:00-04:00', 20024.0, 20040.0, 20020.0, 20036.0, 5780),
+                ]
+            ),
+            '1M': _tradingview_frame(
+                [
+                    ('2026-04-02T09:30:00-04:00', 20000.0, 20009.0, 19997.0, 20006.0, 1200),
+                    ('2026-04-02T09:31:00-04:00', 20006.0, 20012.0, 20004.0, 20010.0, 1250),
+                    ('2026-04-02T09:32:00-04:00', 20010.0, 20016.0, 20008.0, 20014.0, 1325),
+                    ('2026-04-02T09:33:00-04:00', 20014.0, 20022.0, 20012.0, 20020.0, 1400),
+                    ('2026-04-02T09:34:00-04:00', 20020.0, 20030.0, 20018.0, 20028.0, 1450),
+                    ('2026-04-02T09:35:00-04:00', 20028.0, 20036.0, 20024.0, 20034.0, 1500),
+                    ('2026-04-02T09:36:00-04:00', 20034.0, 20042.0, 20030.0, 20040.0, 1525),
+                    ('2026-04-02T09:37:00-04:00', 20040.0, 20046.0, 20036.0, 20044.0, 1550),
+                    ('2026-04-02T09:38:00-04:00', 20044.0, 20050.0, 20040.0, 20048.0, 1600),
+                    ('2026-04-02T09:39:00-04:00', 20048.0, 20056.0, 20044.0, 20052.0, 1625),
+                ]
+            ),
         },
         current_time=datetime(2026, 4, 2, 9, 40, tzinfo=ET),
         macro_state='Risk-On',
@@ -185,6 +225,7 @@ def test_build_analysis_snapshot_from_frames_matches_file_based_parity(
     assert frame_based.request.has_higher_timeframe_context == file_based.request.has_higher_timeframe_context
     assert frame_based.request.bundle_profile == file_based.request.bundle_profile
     assert frame_based.request.is_canonical_bundle == file_based.request.is_canonical_bundle
+    assert frame_based.request.source_files == ('MNQ1!:15M', 'MNQ1!:5M', 'MNQ1!:1M')
 
 
 def test_build_analysis_snapshot_for_single_chart_reuses_memory_context(tmp_path: Path) -> None:

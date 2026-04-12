@@ -20,6 +20,7 @@ class BacktestCase:
     validation_error: str | None = None
     analysis_frames: dict[str, pd.DataFrame] | None = None
     score_frame: pd.DataFrame | None = None
+    source_labels: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

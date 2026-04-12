@@ -360,8 +360,13 @@ def build_analysis_snapshot_from_frames(
     stop: float,
     target: float,
     memory_store: StructuralMemoryStore | None = None,
+    source_labels: tuple[str, ...] | None = None,
 ) -> AnalysisSnapshot:
-    bundle = ChartFrameBundle(instrument=instrument, analysis_frames=analysis_frames)
+    bundle = ChartFrameBundle(
+        instrument=instrument,
+        analysis_frames=analysis_frames,
+        source_labels=source_labels or (),
+    )
     request = build_chart_request_from_bundle(bundle)
     chart_plan = derive_chart_plan_from_frames(analysis_frames)
     session_levels = derive_session_levels_from_frames(

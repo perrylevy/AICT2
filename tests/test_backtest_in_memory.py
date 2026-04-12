@@ -17,6 +17,17 @@ from aict2.io.chart_intake import ChartRequest
 ET = ZoneInfo("America/New_York")
 
 
+def _write_csv(path: Path, rows: list[tuple[str, float, float, float, float]]) -> None:
+    path.write_text(
+        "time,open,high,low,close\n"
+        + "\n".join(
+            f"{timestamp},{open_},{high},{low},{close}"
+            for timestamp, open_, high, low, close in rows
+        ),
+        encoding="utf-8",
+    )
+
+
 def _snapshot(status: str = "LIVE SETUP", state: str = "bullish") -> AnalysisSnapshot:
     return AnalysisSnapshot(
         instrument="MNQ1!",
@@ -99,6 +110,7 @@ def _in_memory_case(tmp_path: Path) -> BacktestCase:
         analysis_frames=analysis_frames,
         score_path=None,
         score_frame=score_frame,
+        source_labels=("CME_MINI_MNQ1!, 5.csv",),
         instrument="MNQ1!",
         ordered_timeframes=("5M",),
         execution_timeframe="5M",
@@ -115,6 +127,7 @@ def test_run_backtest_case_uses_in_memory_analysis_and_score_frames(
 
     def fake_build_analysis_snapshot_from_frames(**kwargs):
         captured["analysis_frames"] = kwargs["analysis_frames"]
+        captured["source_labels"] = kwargs["source_labels"]
         captured["current_time"] = kwargs["current_time"]
         return _snapshot()
 
@@ -129,7 +142,47 @@ def test_run_backtest_case_uses_in_memory_analysis_and_score_frames(
     assert result.trade_outcome == "TP_HIT"
     assert result.trade_score == 1.0
     assert captured["analysis_frames"] is case.analysis_frames
+    assert captured["source_labels"] == case.source_labels
     assert captured["current_time"] == case.analysis_timestamp
+
+
+def test_run_backtest_case_falls_back_to_score_path_when_score_frame_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    analysis = tmp_path / "analysis"
+    score = tmp_path / "score"
+    analysis.mkdir(parents=True)
+    score.mkdir()
+    score_path = score / "CME_MINI_MNQ1!, 1.csv"
+    _write_csv(
+        score_path,
+        [("2026-04-02T10:01:00-04:00", 20005, 20040, 20000, 20035)],
+    )
+    case = BacktestCase(
+        case_id="case-score-fallback",
+        case_path=tmp_path,
+        analysis_paths=(),
+        score_path=score_path,
+        instrument="MNQ1!",
+        ordered_timeframes=("5M",),
+        execution_timeframe="5M",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        validation_error=None,
+        analysis_frames={"5M": _frame("2026-04-02T09:55:00-04:00", 20000, 20010, 19990, 20005)},
+        score_frame=None,
+        source_labels=("CME_MINI_MNQ1!, 5.csv",),
+    )
+
+    monkeypatch.setattr(
+        "aict2.backtest.engine.build_analysis_snapshot_from_frames",
+        lambda **kwargs: _snapshot(),
+    )
+
+    result = run_backtest_case(case)
+
+    assert result.status == "LIVE SETUP"
+    assert result.trade_outcome == "TP_HIT"
+    assert result.trade_score == 1.0
 
 
 def test_run_backtest_case_compare_execution_only_uses_frame_subset(
@@ -146,6 +199,11 @@ def test_run_backtest_case_compare_execution_only_uses_frame_subset(
         },
         score_path=None,
         score_frame=_frame("2026-04-02T09:56:00-04:00", 20005, 20040, 20000, 20035),
+        source_labels=(
+            "CME_MINI_MNQ1!, 1D.csv",
+            "CME_MINI_MNQ1!, 1H.csv",
+            "CME_MINI_MNQ1!, 5.csv",
+        ),
         instrument="MNQ1!",
         ordered_timeframes=("Daily", "1H", "5M"),
         execution_timeframe="5M",
@@ -153,9 +211,11 @@ def test_run_backtest_case_compare_execution_only_uses_frame_subset(
         validation_error=None,
     )
     seen_timeframes: list[tuple[str, ...]] = []
+    seen_labels: list[tuple[str, ...] | None] = []
 
     def fake_build_analysis_snapshot_from_frames(**kwargs):
         seen_timeframes.append(tuple(kwargs["analysis_frames"].keys()))
+        seen_labels.append(kwargs["source_labels"])
         return _snapshot(status="LIVE SETUP" if len(kwargs["analysis_frames"]) == 1 else "WAIT")
 
     monkeypatch.setattr(
@@ -171,3 +231,29 @@ def test_run_backtest_case_compare_execution_only_uses_frame_subset(
     assert result.comparison.execution_only_status == "LIVE SETUP"
     assert result.comparison.differs is True
     assert seen_timeframes == [("Daily", "1H", "5M"), ("5M",)]
+    assert seen_labels == [
+        ("CME_MINI_MNQ1!, 1D.csv", "CME_MINI_MNQ1!, 1H.csv", "CME_MINI_MNQ1!, 5.csv"),
+        ("CME_MINI_MNQ1!, 5.csv",),
+    ]
+
+
+def test_run_backtest_case_rejects_empty_in_memory_analysis_frames(
+    tmp_path: Path,
+) -> None:
+    case = BacktestCase(
+        case_id="case-empty-in-memory",
+        case_path=tmp_path,
+        analysis_paths=(),
+        score_path=None,
+        instrument="MNQ1!",
+        ordered_timeframes=(),
+        execution_timeframe="5M",
+        analysis_timestamp=datetime(2026, 4, 2, 9, 55, tzinfo=ET),
+        validation_error=None,
+        analysis_frames={},
+    )
+
+    result = run_backtest_case(case)
+
+    assert result.status is None
+    assert result.validation_error == "Missing in-memory analysis charts"

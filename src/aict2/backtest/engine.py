@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -55,6 +56,28 @@ def _runtime_failure_result(case: BacktestCase, exc: Exception) -> BacktestCaseR
     )
 
 
+def _validate_in_memory_case(case: BacktestCase) -> str | None:
+    if case.analysis_frames is None:
+        return None
+    if case.instrument is None:
+        return "Missing instrument for in-memory analysis"
+    if case.analysis_timestamp is None:
+        return "Missing analysis timestamp for in-memory analysis"
+    if not case.analysis_frames:
+        return "Missing in-memory analysis charts"
+    if len(case.analysis_frames) != len(case.ordered_timeframes):
+        return "Mismatched in-memory analysis chart count"
+    if tuple(case.analysis_frames.keys()) != case.ordered_timeframes:
+        return "In-memory analysis chart order does not match ordered timeframes"
+    if any(frame is None or frame.empty for frame in case.analysis_frames.values()):
+        return "Empty in-memory analysis chart"
+    if case.source_labels is not None and len(case.source_labels) != len(case.analysis_frames):
+        return "Mismatched in-memory source labels"
+    if case.execution_timeframe is not None and case.execution_timeframe not in case.analysis_frames:
+        return "Missing execution timeframe chart for comparison"
+    return None
+
+
 def _analyze_case(
     case: BacktestCase, memory_store: StructuralMemoryStore | None = None
 ):
@@ -64,6 +87,7 @@ def _analyze_case(
         return build_analysis_snapshot_from_frames(
             instrument=case.instrument,
             analysis_frames=case.analysis_frames,
+            source_labels=case.source_labels,
             current_time=case.analysis_timestamp,
             macro_state="Mixed",
             vix=18.0,
@@ -100,6 +124,13 @@ def _execution_only_case(case: BacktestCase) -> BacktestCase:
         }
         if len(execution_frames) != 1:
             raise ValueError("Missing execution timeframe chart for comparison")
+        execution_source_labels = None
+        if case.source_labels is not None:
+            execution_source_labels = tuple(
+                label
+                for timeframe, label in zip(case.analysis_frames.keys(), case.source_labels)
+                if timeframe == case.execution_timeframe
+            )
         return BacktestCase(
             case_id=case.case_id,
             case_path=case.case_path,
@@ -112,6 +143,7 @@ def _execution_only_case(case: BacktestCase) -> BacktestCase:
             validation_error=case.validation_error,
             analysis_frames=execution_frames,
             score_frame=case.score_frame,
+            source_labels=execution_source_labels,
         )
     execution_paths = tuple(
         path
@@ -165,6 +197,10 @@ def run_backtest_case(
 ) -> BacktestCaseResult:
     if case.validation_error is not None:
         return _invalid_case_result(case)
+    if case.analysis_frames is not None:
+        validation_error = _validate_in_memory_case(case)
+        if validation_error is not None:
+            return _invalid_case_result(replace(case, validation_error=validation_error))
 
     try:
         comparison_memory_store = memory_store

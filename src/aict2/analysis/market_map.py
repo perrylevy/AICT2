@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from aict2.analysis.setup_engine import derive_setup_plan
+import pandas as pd
+
+from aict2.analysis.setup_engine import derive_setup_plan, derive_setup_plan_from_frames
 from aict2.analysis.trade_planning import ChartDerivedPlan
 
 _TF_ORDER = {
@@ -42,3 +44,9 @@ def summarize_timeframe_context(timeframes: list[str]) -> TimeframeSummary:
 
 def derive_chart_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
     return derive_setup_plan(file_paths)
+
+
+def derive_chart_plan_from_frames(
+    frames_by_timeframe: dict[str, pd.DataFrame],
+) -> ChartDerivedPlan | None:
+    return derive_setup_plan_from_frames(frames_by_timeframe)

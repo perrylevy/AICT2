@@ -6,7 +6,11 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from aict2.analysis.market_frame import format_price, load_chart_frames
+from aict2.analysis.market_frame import (
+    format_price,
+    load_chart_frames,
+    load_chart_frames_from_mapping,
+)
 from aict2.io.filename_parsing import parse_chart_file_name
 
 ET = ZoneInfo('America/New_York')
@@ -238,12 +242,12 @@ def _derive_interaction_summary(
     return ' | '.join(interactions[:2])
 
 
-def derive_session_levels_from_paths(
-    file_paths: list[str],
+def derive_session_levels_from_frames(
+    frames_by_timeframe: dict[str, pd.DataFrame],
     *,
     current_time: datetime,
 ) -> SessionLevels | None:
-    frames = load_chart_frames(file_paths, parse_chart_file_name)
+    frames = load_chart_frames_from_mapping(frames_by_timeframe)
     frame = select_best_intraday_frame(frames)
     if frame is None:
         return None
@@ -308,3 +312,12 @@ def derive_session_levels_from_paths(
         rth_gap=_rth_gap_line(frame, trade_date),
         interaction=interaction,
     )
+
+
+def derive_session_levels_from_paths(
+    file_paths: list[str],
+    *,
+    current_time: datetime,
+) -> SessionLevels | None:
+    frames = load_chart_frames(file_paths, parse_chart_file_name)
+    return derive_session_levels_from_frames(frames, current_time=current_time)

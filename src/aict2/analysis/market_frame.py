@@ -182,6 +182,16 @@ def load_chart_frames(
     return frames
 
 
+def load_chart_frames_from_mapping(
+    frames_by_timeframe: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    return {
+        timeframe: normalize_frame(frame)
+        for timeframe, frame in frames_by_timeframe.items()
+        if frame is not None and not frame.empty
+    }
+
+
 def frame_bias(frame: pd.DataFrame, timeframe: str) -> ChartFrameFacts:
     lookback = max(3, min(len(frame), 20))
     recent = frame.tail(lookback)

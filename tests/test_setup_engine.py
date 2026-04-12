@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
+
 from aict2.analysis.setup_engine import (
     _resolve_execution_override_bias,
     _should_relax_retrace_requirement,
     derive_setup_plan,
+    derive_setup_plan_from_frames,
     resolve_confirmation_requirement,
     resolve_stop_run_confirmation,
     resolve_target_and_tp_model,
@@ -22,6 +25,57 @@ def _write_chart(path: Path, rows: list[tuple[str, float, float, float, float]])
         ),
         encoding="utf-8",
     )
+
+
+def test_derive_setup_plan_from_frames_matches_path_variant(tmp_path: Path) -> None:
+    daily = pd.DataFrame(
+        {
+            "time": [
+                "2026-03-31T00:00:00-04:00",
+                "2026-04-01T00:00:00-04:00",
+                "2026-04-02T00:00:00-04:00",
+            ],
+            "open": [23960.0, 24050.0, 24120.0],
+            "high": [24020.0, 24110.0, 24210.0],
+            "low": [23920.0, 24000.0, 24090.0],
+            "close": [23980.0, 24090.0, 24180.0],
+        }
+    )
+    five = pd.DataFrame(
+        {
+            "time": [
+                "2026-04-02T09:30:00-04:00",
+                "2026-04-02T09:35:00-04:00",
+                "2026-04-02T09:40:00-04:00",
+                "2026-04-02T09:45:00-04:00",
+                "2026-04-02T09:50:00-04:00",
+                "2026-04-02T09:55:00-04:00",
+                "2026-04-02T10:00:00-04:00",
+            ],
+            "open": [100.0, 99.2, 98.9, 98.1, 97.6, 99.1, 100.7],
+            "high": [100.5, 99.8, 99.0, 98.5, 99.2, 100.8, 102.4],
+            "low": [99.0, 98.7, 97.8, 97.2, 97.5, 99.0, 100.6],
+            "close": [99.2, 98.9, 98.1, 97.6, 99.1, 100.7, 102.1],
+        }
+    )
+
+    chart_daily = tmp_path / "CME_MINI_MNQ1!, 1D.csv"
+    chart_5 = tmp_path / "CME_MINI_MNQ1!, 5.csv"
+    _write_chart(chart_daily, list(daily.itertuples(index=False, name=None)))
+    _write_chart(chart_5, list(five.itertuples(index=False, name=None)))
+
+    path_plan = derive_setup_plan([str(chart_daily), str(chart_5)])
+    plan = derive_setup_plan_from_frames({"Daily": daily, "5M": five})
+
+    assert plan is not None
+    assert path_plan is not None
+    assert plan.bias == path_plan.bias
+    assert plan.entry == path_plan.entry
+    assert plan.stop == path_plan.stop
+    assert plan.target == path_plan.target
+    assert plan.entry > 0.0
+    assert plan.stop > 0.0
+    assert plan.target > 0.0
 
 
 def test_derive_setup_plan_builds_deterministic_plan_from_charts(tmp_path: Path) -> None:

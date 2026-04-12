@@ -6,7 +6,12 @@ from datetime import time
 import pandas as pd
 
 from aict2.analysis.gap_levels import derive_gap_confluence, derive_gap_summary
-from aict2.analysis.market_frame import ChartFrameFacts, frame_bias, load_chart_frames
+from aict2.analysis.market_frame import (
+    ChartFrameFacts,
+    frame_bias,
+    load_chart_frames,
+    load_chart_frames_from_mapping,
+)
 from aict2.analysis.opening_levels import derive_opening_levels_summary
 from aict2.analysis.pd_arrays import (
     derive_execution_entry_trigger,
@@ -686,10 +691,12 @@ def resolve_target_and_tp_model(
     )
 
 
-def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
-    if not file_paths:
+def derive_setup_plan_from_frames(
+    frames_by_timeframe: dict[str, pd.DataFrame],
+) -> ChartDerivedPlan | None:
+    if not frames_by_timeframe:
         return None
-    frames = load_chart_frames(file_paths, parse_chart_file_name)
+    frames = load_chart_frames_from_mapping(frames_by_timeframe)
     if not frames:
         return None
 
@@ -817,3 +824,10 @@ def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
         needs_confirmation=confirmation_needed,
         requires_retrace=retrace_required,
     )
+
+
+def derive_setup_plan(file_paths: list[str]) -> ChartDerivedPlan | None:
+    if not file_paths:
+        return None
+    frames = load_chart_frames(file_paths, parse_chart_file_name)
+    return derive_setup_plan_from_frames(frames)

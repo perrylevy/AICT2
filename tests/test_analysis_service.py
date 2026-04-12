@@ -4,7 +4,13 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aict2.analysis.analysis_service import _derive_status, build_analysis_snapshot
+import pandas as pd
+
+from aict2.analysis.analysis_service import (
+    _derive_status,
+    build_analysis_snapshot,
+    build_analysis_snapshot_from_frames,
+)
 from aict2.context.store import ContextStore
 from aict2.context.structural_memory import StructuralMemorySnapshot, StructuralMemoryStore
 from aict2.analysis.risk_gate import evaluate_risk_gate
@@ -63,6 +69,122 @@ def test_build_analysis_snapshot_for_multi_chart_setup_saves_memory(tmp_path: Pa
         lookback_days=20,
         reference_context='Using latest uploaded higher-timeframe structure only',
     )
+
+
+def test_build_analysis_snapshot_from_frames_matches_file_based_parity(
+    tmp_path: Path,
+) -> None:
+    chart_15 = tmp_path / 'CME_MINI_MNQ1!, 15.csv'
+    chart_5 = tmp_path / 'CME_MINI_MNQ1!, 5.csv'
+    chart_1 = tmp_path / 'CME_MINI_MNQ1!, 1.csv'
+
+    _write_chart(
+        chart_15,
+        [
+            ('2026-04-01T00:00:00-04:00', 19940.0, 20010.0, 19920.0, 19988.0),
+            ('2026-04-02T00:00:00-04:00', 19988.0, 20042.0, 19970.0, 20018.0),
+        ],
+    )
+    _write_chart(
+        chart_5,
+        [
+            ('2026-04-02T09:30:00-04:00', 20000.0, 20008.0, 19996.0, 20005.0),
+            ('2026-04-02T09:35:00-04:00', 20005.0, 20018.0, 20003.0, 20015.0),
+            ('2026-04-02T09:40:00-04:00', 20015.0, 20028.0, 20012.0, 20024.0),
+            ('2026-04-02T09:45:00-04:00', 20024.0, 20040.0, 20020.0, 20036.0),
+        ],
+    )
+    _write_chart(
+        chart_1,
+        [
+            ('2026-04-02T09:30:00-04:00', 20000.0, 20009.0, 19997.0, 20006.0),
+            ('2026-04-02T09:31:00-04:00', 20006.0, 20012.0, 20004.0, 20010.0),
+            ('2026-04-02T09:32:00-04:00', 20010.0, 20016.0, 20008.0, 20014.0),
+            ('2026-04-02T09:33:00-04:00', 20014.0, 20022.0, 20012.0, 20020.0),
+            ('2026-04-02T09:34:00-04:00', 20020.0, 20030.0, 20018.0, 20028.0),
+            ('2026-04-02T09:35:00-04:00', 20028.0, 20036.0, 20024.0, 20034.0),
+            ('2026-04-02T09:36:00-04:00', 20034.0, 20042.0, 20030.0, 20040.0),
+            ('2026-04-02T09:37:00-04:00', 20040.0, 20046.0, 20036.0, 20044.0),
+            ('2026-04-02T09:38:00-04:00', 20044.0, 20050.0, 20040.0, 20048.0),
+            ('2026-04-02T09:39:00-04:00', 20048.0, 20056.0, 20044.0, 20052.0),
+        ],
+    )
+
+    file_context_store = ContextStore(tmp_path / 'files.db')
+    file_context_store.initialize()
+    file_memory_store = StructuralMemoryStore(file_context_store)
+    frame_context_store = ContextStore(tmp_path / 'frames.db')
+    frame_context_store.initialize()
+    frame_memory_store = StructuralMemoryStore(frame_context_store)
+
+    file_based = build_analysis_snapshot(
+        file_names=[
+            chart_15.name,
+            chart_5.name,
+            chart_1.name,
+        ],
+        file_paths=[str(chart_15), str(chart_5), str(chart_1)],
+        current_time=datetime(2026, 4, 2, 9, 40, tzinfo=ET),
+        macro_state='Risk-On',
+        vix=17.8,
+        bias='bullish',
+        daily_profile='continuation',
+        entry=20000.0,
+        stop=19990.0,
+        target=20020.0,
+        memory_store=file_memory_store,
+    )
+
+    frame_based = build_analysis_snapshot_from_frames(
+        instrument='MNQ1!',
+        analysis_frames={
+            '15M': pd.read_csv(chart_15),
+            '5M': pd.read_csv(chart_5),
+            '1M': pd.read_csv(chart_1),
+        },
+        current_time=datetime(2026, 4, 2, 9, 40, tzinfo=ET),
+        macro_state='Risk-On',
+        vix=17.8,
+        bias='bullish',
+        daily_profile='continuation',
+        entry=20000.0,
+        stop=19990.0,
+        target=20020.0,
+        memory_store=frame_memory_store,
+    )
+
+    assert frame_based.status == file_based.status
+    assert frame_based.thesis == file_based.thesis
+    assert frame_based.session == file_based.session
+    assert frame_based.risk == file_based.risk
+    assert frame_based.entry == file_based.entry
+    assert frame_based.stop == file_based.stop
+    assert frame_based.target == file_based.target
+    assert frame_based.liquidity_summary == file_based.liquidity_summary
+    assert frame_based.reference_context == file_based.reference_context
+    assert frame_based.internal_reference_context == file_based.internal_reference_context
+    assert frame_based.draw_on_liquidity == file_based.draw_on_liquidity
+    assert frame_based.htf_reference == file_based.htf_reference
+    assert frame_based.stop_run_summary == file_based.stop_run_summary
+    assert frame_based.gap_summary == file_based.gap_summary
+    assert frame_based.gap_confluence == file_based.gap_confluence
+    assert frame_based.opening_summary == file_based.opening_summary
+    assert frame_based.opening_confluence == file_based.opening_confluence
+    assert frame_based.pd_array_summary == file_based.pd_array_summary
+    assert frame_based.pd_array_confluence == file_based.pd_array_confluence
+    assert frame_based.entry_model == file_based.entry_model
+    assert frame_based.tp_model == file_based.tp_model
+    assert frame_based.target_reason == file_based.target_reason
+    assert frame_based.needs_confirmation == file_based.needs_confirmation
+    assert frame_based.requires_retrace == file_based.requires_retrace
+    assert frame_based.session_levels == file_based.session_levels
+    assert frame_based.request.instrument == file_based.request.instrument
+    assert frame_based.request.mode == file_based.request.mode
+    assert frame_based.request.ordered_timeframes == file_based.request.ordered_timeframes
+    assert frame_based.request.execution_timeframe == file_based.request.execution_timeframe
+    assert frame_based.request.has_higher_timeframe_context == file_based.request.has_higher_timeframe_context
+    assert frame_based.request.bundle_profile == file_based.request.bundle_profile
+    assert frame_based.request.is_canonical_bundle == file_based.request.is_canonical_bundle
 
 
 def test_build_analysis_snapshot_for_single_chart_reuses_memory_context(tmp_path: Path) -> None:

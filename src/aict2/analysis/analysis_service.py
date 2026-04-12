@@ -3,13 +3,28 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from aict2.analysis.market_map import ChartDerivedPlan, derive_chart_plan
+import pandas as pd
+
+from aict2.analysis.market_map import (
+    ChartDerivedPlan,
+    derive_chart_plan,
+    derive_chart_plan_from_frames,
+)
 from aict2.analysis.risk_gate import RiskGateResult, evaluate_risk_gate
-from aict2.analysis.session_levels import SessionLevels, derive_session_levels_from_paths
+from aict2.analysis.session_levels import (
+    SessionLevels,
+    derive_session_levels_from_frames,
+    derive_session_levels_from_paths,
+)
 from aict2.analysis.session_lens import SessionLens, build_session_lens
 from aict2.analysis.trade_thesis import TradeThesis, derive_trade_thesis
 from aict2.context.structural_memory import StructuralMemorySnapshot, StructuralMemoryStore
-from aict2.io.chart_intake import ChartRequest, build_chart_request
+from aict2.io.chart_bundle import ChartFrameBundle
+from aict2.io.chart_intake import (
+    ChartRequest,
+    build_chart_request,
+    build_chart_request_from_bundle,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,8 +154,9 @@ def _derive_status(
     return 'LIVE SETUP'
 
 
-def build_analysis_snapshot(
-    file_names: list[str],
+def _build_analysis_snapshot(
+    *,
+    request: ChartRequest,
     current_time: datetime,
     macro_state: str,
     vix: float,
@@ -149,16 +165,10 @@ def build_analysis_snapshot(
     entry: float,
     stop: float,
     target: float,
-    file_paths: list[str] | None = None,
-    memory_store: StructuralMemoryStore | None = None,
+    chart_plan: ChartDerivedPlan | None,
+    session_levels: SessionLevels | None,
+    memory_store: StructuralMemoryStore | None,
 ) -> AnalysisSnapshot:
-    request = build_chart_request(file_names)
-    chart_plan = derive_chart_plan(file_paths or []) if file_paths else None
-    session_levels = (
-        derive_session_levels_from_paths(file_paths or [], current_time=current_time)
-        if file_paths
-        else None
-    )
     resolved_bias, resolved_profile, used_structural_memory = _resolve_bias_and_profile(
         request=request,
         bias=bias,
@@ -228,9 +238,7 @@ def build_analysis_snapshot(
     resolved_entry_model = (
         chart_plan.entry_model if chart_plan is not None else '5M/15M Confirmation'
     )
-    resolved_tp_model = (
-        chart_plan.tp_model if chart_plan is not None else '2R'
-    )
+    resolved_tp_model = chart_plan.tp_model if chart_plan is not None else '2R'
     resolved_target_reason = (
         chart_plan.target_reason
         if chart_plan is not None
@@ -301,5 +309,77 @@ def build_analysis_snapshot(
         needs_confirmation=needs_confirmation,
         requires_retrace=requires_retrace,
         session_levels=session_levels,
+    )
+
+
+def build_analysis_snapshot(
+    file_names: list[str],
+    current_time: datetime,
+    macro_state: str,
+    vix: float,
+    bias: str | None,
+    daily_profile: str | None,
+    entry: float,
+    stop: float,
+    target: float,
+    file_paths: list[str] | None = None,
+    memory_store: StructuralMemoryStore | None = None,
+) -> AnalysisSnapshot:
+    request = build_chart_request(file_names)
+    chart_plan = derive_chart_plan(file_paths or []) if file_paths else None
+    session_levels = (
+        derive_session_levels_from_paths(file_paths or [], current_time=current_time)
+        if file_paths
+        else None
+    )
+    return _build_analysis_snapshot(
+        request=request,
+        current_time=current_time,
+        macro_state=macro_state,
+        vix=vix,
+        bias=bias,
+        daily_profile=daily_profile,
+        entry=entry,
+        stop=stop,
+        target=target,
+        chart_plan=chart_plan,
+        session_levels=session_levels,
+        memory_store=memory_store,
+    )
+
+
+def build_analysis_snapshot_from_frames(
+    instrument: str,
+    analysis_frames: dict[str, pd.DataFrame],
+    current_time: datetime,
+    macro_state: str,
+    vix: float,
+    bias: str | None,
+    daily_profile: str | None,
+    entry: float,
+    stop: float,
+    target: float,
+    memory_store: StructuralMemoryStore | None = None,
+) -> AnalysisSnapshot:
+    bundle = ChartFrameBundle(instrument=instrument, analysis_frames=analysis_frames)
+    request = build_chart_request_from_bundle(bundle)
+    chart_plan = derive_chart_plan_from_frames(analysis_frames)
+    session_levels = derive_session_levels_from_frames(
+        analysis_frames,
+        current_time=current_time,
+    )
+    return _build_analysis_snapshot(
+        request=request,
+        current_time=current_time,
+        macro_state=macro_state,
+        vix=vix,
+        bias=bias,
+        daily_profile=daily_profile,
+        entry=entry,
+        stop=stop,
+        target=target,
+        chart_plan=chart_plan,
+        session_levels=session_levels,
+        memory_store=memory_store,
     )
 
